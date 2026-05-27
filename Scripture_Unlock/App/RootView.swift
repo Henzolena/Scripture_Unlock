@@ -5,6 +5,7 @@ import SwiftData
 /// Also intercepts when AlarmService fires an alarm mid-use.
 struct RootView: View {
     @Environment(AlarmService.self) private var alarmService
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var profiles: [UserProfile]
 
     var body: some View {
@@ -13,13 +14,22 @@ struct RootView: View {
                 OnboardingFlow()
             } else {
                 MainTabView()
-                    // Full-screen alarm sheet — overrides everything
                     .fullScreenCover(item: Binding(
                         get: { alarmService.activeAlarm },
-                        set: { _ in }
+                        set: { _ in }          // dismissal only via trivia completion
                     )) { alarm in
                         RingingView(alarm: alarm)
+                            .interactiveDismissDisabled(true)
                     }
+            }
+        }
+        // When user backs out of the alarm screen, fire a re-engagement notification
+        // within 4 seconds so the alarm sound re-asserts itself
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background, alarmService.activeAlarm != nil {
+                alarmService.scheduleReengagementNotification()
+            } else if newPhase == .active {
+                alarmService.cancelReengagementNotification()
             }
         }
     }

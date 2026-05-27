@@ -8,6 +8,7 @@ struct RingingView: View {
 
     var body: some View {
         ZStack {
+
             DesignSystem.midnightGradient.ignoresSafeArea()
 
             RadialGradient(
@@ -80,7 +81,7 @@ struct RingingView: View {
                 }
                 .padding(.horizontal, 24)
 
-                Text("Drag the seal up for emergency stop")
+                Text("Answer all verses to silence the alarm.")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.top, 10)
@@ -88,8 +89,10 @@ struct RingingView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear  { AlarmService.shared.startAlarmAudio() }
         .fullScreenCover(isPresented: $showTrivia) {
             TriviaContainerView(alarm: alarm)
+                .interactiveDismissDisabled(true)
         }
     }
 }
