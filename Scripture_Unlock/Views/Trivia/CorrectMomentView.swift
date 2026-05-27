@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Full-screen celebration modal shown after each correct answer.
 /// Auto-dismisses after 3 s; tap anywhere to continue immediately.
@@ -9,6 +10,15 @@ struct CorrectMomentView: View {
     let completedStep: Int       // 0-based index just answered (0 = first Q)
     let totalSteps: Int
     let onContinue: () -> Void
+
+    // MARK: - SwiftData + Amharic
+
+    @Query private var profiles: [UserProfile]
+    @State private var amharicText: String? = nil
+
+    private var amharicEnabled: Bool {
+        profiles.first?.amharicAlongside ?? false
+    }
 
     // MARK: - Animation states
 
@@ -80,6 +90,11 @@ struct CorrectMomentView: View {
         .onTapGesture { dismiss() }
         .onAppear { runAnimations() }
         .onDisappear { autoDismissTask?.cancel() }
+        .task {
+            if amharicEnabled {
+                amharicText = await BetezionService.shared.amharic(forRef: question.verseRef)
+            }
+        }
         .preferredColorScheme(.dark)
     }
 
@@ -151,6 +166,41 @@ struct CorrectMomentView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(5)
                 .padding(.horizontal, 36)
+
+            // Amharic translation (shown only when the setting is on + loaded)
+            if amharicEnabled {
+                Divider()
+                    .background(.white.opacity(0.15))
+                    .padding(.horizontal, 36)
+                    .padding(.top, 4)
+
+                HStack(spacing: 6) {
+                    Text("🇪🇹")
+                        .font(.system(size: 11))
+                    Text("አማርኛ")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(DesignSystem.pastoralGold)
+                }
+
+                if let amharic = amharicText {
+                    Text(amharic)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.70))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 36)
+                        .environment(\.layoutDirection, .leftToRight)
+                } else {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.white.opacity(0.5))
+                        Text("በመጫን ላይ…")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.40))
+                    }
+                }
+            }
         }
     }
 

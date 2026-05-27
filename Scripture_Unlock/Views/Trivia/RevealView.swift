@@ -1,9 +1,19 @@
 import SwiftUI
+import SwiftData
 
 /// Shown after a correct answer — highlights the right option, reveals the full verse.
+/// When the user has enabled "Amharic alongside English" in Settings, the verse card
+/// also shows the Amharic text fetched from api.betezion.com.
 struct RevealView: View {
     let question: TriviaQuestion
     @Bindable var vm: TriviaViewModel
+    @Query private var profiles: [UserProfile]
+
+    @State private var amharicText: String? = nil
+
+    private var amharicEnabled: Bool {
+        profiles.first?.amharicAlongside ?? false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,21 +76,9 @@ struct RevealView: View {
                     }
                     .padding(.horizontal, 24).padding(.top, 20)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(question.verseRef.uppercased())
-                            .font(.system(size: 10, weight: .bold)).tracking(2)
-                            .foregroundStyle(DesignSystem.pastoralGold)
-                        Text("\u{201C}\(question.verseText)\u{201D}")
-                            .font(DesignSystem.serif(14, italic: true))
-                            .foregroundStyle(DesignSystem.slate600)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(DesignSystem.pastoralGold.opacity(0.10))
-                    .cornerRadius(12)
-                    .overlay(Rectangle().fill(DesignSystem.pastoralGold).frame(width: 2), alignment: .leading)
-                    .padding(.horizontal, 24).padding(.top, 18)
+                    // ── Verse card ────────────────────────────────────────
+                    verseCard
+                        .padding(.horizontal, 24).padding(.top, 18)
 
                     Spacer(minLength: 32)
                 }
@@ -88,12 +86,70 @@ struct RevealView: View {
 
             PrimaryButton(
                 title: vm.isLastStep ? "Silence the alarm" : "Next verse",
-                icon: vm.isLastStep ? "bell.slash.fill" : "chevron.right"
+                icon:  vm.isLastStep ? "bell.slash.fill" : "chevron.right"
             ) {
                 vm.continueAfterReveal()
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
         }
+        .task {
+            if amharicEnabled {
+                amharicText = await BetezionService.shared.amharic(forRef: question.verseRef)
+            }
+        }
+    }
+
+    // MARK: - Verse card
+
+    private var verseCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Reference
+            Text(question.verseRef.uppercased())
+                .font(.system(size: 10, weight: .bold)).tracking(2)
+                .foregroundStyle(DesignSystem.pastoralGold)
+
+            // English text
+            Text("\u{201C}\(question.verseText)\u{201D}")
+                .font(DesignSystem.serif(14, italic: true))
+                .foregroundStyle(DesignSystem.slate600)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Amharic text (shown only when enabled + loaded)
+            if amharicEnabled {
+                Divider()
+                    .padding(.vertical, 4)
+
+                HStack(spacing: 6) {
+                    Text("🇪🇹")
+                        .font(.system(size: 11))
+                    Text("አማርኛ")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(DesignSystem.pastoralGold)
+                }
+
+                if let amharic = amharicText {
+                    Text(amharic)
+                        .font(.system(size: 15))
+                        .foregroundStyle(DesignSystem.slate700)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .environment(\.layoutDirection, .leftToRight)
+                } else {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.75)
+                        Text("በመጫን ላይ…")
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesignSystem.slate400)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignSystem.pastoralGold.opacity(0.10))
+        .cornerRadius(12)
+        .overlay(Rectangle().fill(DesignSystem.pastoralGold).frame(width: 2), alignment: .leading)
     }
 }
