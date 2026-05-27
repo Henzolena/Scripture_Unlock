@@ -51,7 +51,7 @@ final class AlarmService: NSObject {
 
     private func requestPermissions() async {
         let granted = try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive])
+            .requestAuthorization(options: [.alert, .sound, .badge])
         await MainActor.run { hasNotificationPermission = granted ?? false }
     }
 
