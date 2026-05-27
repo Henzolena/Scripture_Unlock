@@ -19,6 +19,7 @@ struct OnboardingFlow: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: step)
+        .preferredColorScheme(.light)
     }
 
     private func finish() {

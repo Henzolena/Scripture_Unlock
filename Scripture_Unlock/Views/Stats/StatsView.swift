@@ -58,6 +58,7 @@ struct StatsView: View {
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .navigationTitle("Streak")
+            .toolbarColorScheme(.light, for: .navigationBar)
         }
     }
 

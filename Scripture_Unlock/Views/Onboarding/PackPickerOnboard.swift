@@ -96,29 +96,42 @@ struct FirstAlarmView: View {
                 Text("We recommend a time that gives you 10 quiet minutes after the alarm.")
                     .font(.system(size: 14)).foregroundStyle(DesignSystem.slate600).padding(.top, 6)
 
-                VStack(spacing: 16) {
-                    Text(selectedTime.formatted(.dateTime.hour(.twoDigits(amPM: .wide)).minute(.twoDigits)))
-                        .font(.system(size: 72, weight: .heavy, design: .monospaced))
-                        .foregroundStyle(DesignSystem.deepBlue)
+                VStack(spacing: 0) {
+                    DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.wheel)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
 
-                    HStack(spacing: 8) {
-                        ForEach(quickTimes, id: \.self) { t in
-                            let isSelected = formatTime(selectedTime) == t
-                            Button { setTime(t) } label: {
-                                Text(t)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(isSelected ? .white : DesignSystem.slate600)
-                                    .padding(.horizontal, 14).padding(.vertical, 8)
-                                    .background(isSelected ? DesignSystem.deepBlue : DesignSystem.surface)
-                                    .cornerRadius(999)
-                                    .overlay(RoundedRectangle(cornerRadius: 999)
-                                        .stroke(isSelected ? Color.clear : Color.black.opacity(0.12), lineWidth: 0.5))
+                    Divider().padding(.horizontal, 12)
+
+                    VStack(spacing: 8) {
+                        Text("Quick pick")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(2)
+                            .textCase(.uppercase)
+                            .foregroundStyle(DesignSystem.slate400)
+
+                        HStack(spacing: 8) {
+                            ForEach(quickTimes, id: \.self) { t in
+                                let isSelected = formatTime(selectedTime) == t
+                                Button { setTime(t) } label: {
+                                    Text(t)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(isSelected ? .white : DesignSystem.slate600)
+                                        .padding(.horizontal, 14).padding(.vertical, 8)
+                                        .background(isSelected ? DesignSystem.deepBlue : Color.black.opacity(0.04))
+                                        .cornerRadius(999)
+                                        .overlay(RoundedRectangle(cornerRadius: 999)
+                                            .stroke(isSelected ? Color.clear : Color.black.opacity(0.10), lineWidth: 0.5))
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(.vertical, 14)
                 }
-                .frame(maxWidth: .infinity).padding(.vertical, 28)
                 .background(DesignSystem.surface)
                 .cornerRadius(20)
                 .overlay(alignment: .top) {

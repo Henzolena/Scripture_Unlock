@@ -49,7 +49,9 @@ struct HomeView: View {
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
+            .navigationTitle("Scripture Unlock")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

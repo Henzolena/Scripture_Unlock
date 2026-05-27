@@ -73,6 +73,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .tint(DesignSystem.deepBlue)
+            .toolbarColorScheme(.light, for: .navigationBar)
         }
     }
 }
