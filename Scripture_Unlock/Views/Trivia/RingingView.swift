@@ -57,13 +57,15 @@ struct RingingView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "lock.fill")
                         .foregroundStyle(DesignSystem.pastoralGold)
-                    Text("Snooze locked. Answer ")
-                        .foregroundStyle(.white.opacity(0.8))
-                    + Text("\(alarm.effectiveQuestionCount) verses")
-                        .foregroundStyle(DesignSystem.pastoralGold)
-                        .fontWeight(.bold)
-                    + Text(" to silence.")
-                        .foregroundStyle(.white.opacity(0.8))
+                    HStack(spacing: 0) {
+                        Text("Snooze locked. Answer ")
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text("\(alarm.effectiveQuestionCount) verses")
+                            .foregroundStyle(DesignSystem.pastoralGold)
+                            .fontWeight(.bold)
+                        Text(" to silence.")
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
                 }
                 .font(.system(size: 12.5))
                 .padding(14)

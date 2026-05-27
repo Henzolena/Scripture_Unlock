@@ -76,12 +76,14 @@ struct HomeView: View {
                 Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(DesignSystem.slate600)
-                Group {
-                    Text("Good morning,\n") + Text(profile?.name ?? "friend")
-                        .foregroundColor(DesignSystem.deepBlue)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Good morning,")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(DesignSystem.ink)
+                    Text(profile?.name ?? "friend")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(DesignSystem.deepBlue)
                 }
-                .font(.system(size: 30, weight: .bold, design: .default))
-                .foregroundStyle(DesignSystem.ink)
 
                 if currentStreak > 0 {
                     HStack(spacing: 6) {

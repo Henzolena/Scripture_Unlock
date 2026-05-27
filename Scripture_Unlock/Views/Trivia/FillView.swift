@@ -68,21 +68,23 @@ struct FillView: View {
     // MARK: - Verse with blank
 
     private var verseText: some View {
-        let pre  = question.fillPre  ?? ""
-        let post = question.fillPost ?? ""
+        let pre    = question.fillPre  ?? ""
+        let post   = question.fillPost ?? ""
         let filled = vm.fillPickedIndex.map { question.options[$0] }
 
-        return Group {
-            Text(pre + " ")
-                .font(DesignSystem.serif(26, italic: true))
-                .foregroundStyle(DesignSystem.ink)
-            + Text(filled ?? "          ")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(filled == nil ? DesignSystem.slate400 : DesignSystem.deepBlue)
-            + Text(" " + post)
-                .font(DesignSystem.serif(26, italic: true))
-                .foregroundStyle(DesignSystem.ink)
-        }
+        var preAttr = AttributedString(pre + " ")
+        preAttr.swiftUI.font           = DesignSystem.serif(26, italic: true)
+        preAttr.swiftUI.foregroundColor = DesignSystem.ink
+
+        var blankAttr = AttributedString(filled ?? "          ")
+        blankAttr.swiftUI.font           = .system(size: 22, weight: .bold)
+        blankAttr.swiftUI.foregroundColor = filled == nil ? DesignSystem.slate400 : DesignSystem.deepBlue
+
+        var postAttr = AttributedString(" " + post)
+        postAttr.swiftUI.font           = DesignSystem.serif(26, italic: true)
+        postAttr.swiftUI.foregroundColor = DesignSystem.ink
+
+        return Text(preAttr + blankAttr + postAttr)
     }
 
     // MARK: - Chip grid

@@ -93,12 +93,15 @@ struct MissBanner: View {
                     .foregroundStyle(DesignSystem.danger)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Not quite — answer was ")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DesignSystem.ink)
-                + Text(missed.correctAnswer)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DesignSystem.bethanyGreen)
+                Text({
+                    var base = AttributedString("Not quite — answer was ")
+                    base.swiftUI.font           = .system(size: 13, weight: .bold)
+                    base.swiftUI.foregroundColor = DesignSystem.ink
+                    var answer = AttributedString(missed.correctAnswer)
+                    answer.swiftUI.font           = .system(size: 13, weight: .bold)
+                    answer.swiftUI.foregroundColor = DesignSystem.bethanyGreen
+                    return base + answer
+                }())
 
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")
