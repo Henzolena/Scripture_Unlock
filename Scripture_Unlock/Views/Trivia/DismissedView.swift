@@ -60,7 +60,7 @@ struct DismissedView: View {
                 .padding(.top, 28)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(""")
+                    Text("\u{201C}")
                         .font(DesignSystem.serif(80, italic: false))
                         .foregroundStyle(DesignSystem.pastoralGold)
                         .frame(height: 40)

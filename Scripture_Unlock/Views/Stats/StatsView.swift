@@ -114,7 +114,7 @@ struct StatsView: View {
                 ForEach(TriviaQuestion.samples.prefix(3)) { q in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(q.verseRef.uppercased()).font(.system(size: 10, weight: .bold)).tracking(2).foregroundStyle(DesignSystem.pastoralGold)
-                        Text(""\(q.verseText)"").font(DesignSystem.serif(13, italic: true)).foregroundStyle(DesignSystem.slate600).lineLimit(2)
+                        Text("\u{201C}\(q.verseText)\u{201D}").font(DesignSystem.serif(13, italic: true)).foregroundStyle(DesignSystem.slate600).lineLimit(2)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 14)
                     if q.id != TriviaQuestion.samples.prefix(3).last?.id { Divider().padding(.leading, 16) }

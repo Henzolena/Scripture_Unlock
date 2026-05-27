@@ -181,7 +181,7 @@ struct VerseCard: View {
                     .textCase(.uppercase)
             }
 
-            Text(""\(text)"")
+            Text("\u{201C}\(text)\u{201D}")
                 .font(DesignSystem.serif(17, italic: true))
                 .foregroundStyle(DesignSystem.ink)
                 .fixedSize(horizontal: false, vertical: true)

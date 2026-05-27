@@ -70,7 +70,7 @@ struct RevealView: View {
                         Text(question.verseRef.uppercased())
                             .font(.system(size: 10, weight: .bold)).tracking(2)
                             .foregroundStyle(DesignSystem.pastoralGold)
-                        Text(""\(question.verseText)"")
+                        Text("\u{201C}\(question.verseText)\u{201D}")
                             .font(DesignSystem.serif(14, italic: true))
                             .foregroundStyle(DesignSystem.slate600)
                             .fixedSize(horizontal: false, vertical: true)

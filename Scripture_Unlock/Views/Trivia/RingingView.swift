@@ -40,7 +40,7 @@ struct RingingView: View {
                     .tracking(2.5)
                     .foregroundStyle(DesignSystem.pastoralGold.opacity(0.85))
 
-                Text(""Awake, my soul! Awake, O harp and lyre!\nI will awake the dawn!"")
+                Text("\u{201C}Awake, my soul! Awake, O harp and lyre!\nI will awake the dawn!\u{201D}")
                     .font(DesignSystem.serif(17, italic: true))
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
