@@ -1,0 +1,19 @@
+# Secrets — NEVER commit
+Secrets.xcconfig
+*.xcconfig
+!*.xcconfig.example
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcarchive
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
