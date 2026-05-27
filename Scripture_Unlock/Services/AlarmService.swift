@@ -63,7 +63,7 @@ final class AlarmService: NSObject {
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
     }
 
-    /// Starts the in-app alarm tone loop and keeps the screen on.
+    /// Starts the in-app alarm tone and loops it until stopAlarmAudio() is called.
     func startAlarmAudio() {
         guard !isAudioActive else { return }
         do {
@@ -74,41 +74,40 @@ final class AlarmService: NSObject {
             )
             try AVAudioSession.sharedInstance().setActive(true)
 
-            // Build a repeating two-tone beep (440 Hz / 880 Hz, 0.4 s / 0.2 s)
+            // Build one buffer containing the full beep pattern:
+            // 0.35 s high (880 Hz) + 0.25 s low (660 Hz) + 0.65 s silence
+            // Then schedule it with .loops — AVAudioPlayerNode repeats it
+            // indefinitely without any completion-handler chaining.
             let sampleRate: Double = 44_100
             let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
 
-            func tone(hz: Double, duration: Double, amplitude: Float = 0.6) -> AVAudioPCMBuffer {
-                let frameCount = AVAudioFrameCount(sampleRate * duration)
-                let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-                buf.frameLength = frameCount
-                let data = buf.floatChannelData![0]
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / sampleRate
-                    data[i] = amplitude * Float(sin(2 * .pi * hz * t))
-                }
-                return buf
-            }
+            let highFrames    = Int(sampleRate * 0.35)
+            let lowFrames     = Int(sampleRate * 0.25)
+            let silenceFrames = Int(sampleRate * 0.65)
+            let totalFrames   = highFrames + lowFrames + silenceFrames
 
-            // Sequence: high beep → low beep → silence → repeat
-            let high    = tone(hz: 880, duration: 0.35)
-            let low     = tone(hz: 660, duration: 0.25)
-            let silence = tone(hz: 0,   duration: 0.40, amplitude: 0)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                          frameCapacity: AVAudioFrameCount(totalFrames))!
+            buffer.frameLength = AVAudioFrameCount(totalFrames)
+            let data = buffer.floatChannelData![0]
+
+            let amplitude: Float = 0.65
+            for i in 0..<highFrames {
+                data[i] = amplitude * Float(sin(2 * .pi * 880 * Double(i) / sampleRate))
+            }
+            for i in 0..<lowFrames {
+                data[highFrames + i] = amplitude * Float(sin(2 * .pi * 660 * Double(i) / sampleRate))
+            }
+            // silence frames are zero-initialised by AVAudioPCMBuffer
 
             if !audioEngine.isRunning { try audioEngine.start() }
 
-            playerNode.scheduleBuffer(high,    completionHandler: nil)
-            playerNode.scheduleBuffer(low,     completionHandler: nil)
-            playerNode.scheduleBuffer(silence) { [weak self] in
-                // Loop the pattern
-                self?.playerNode.scheduleBuffer(high,    completionHandler: nil)
-                self?.playerNode.scheduleBuffer(low,     completionHandler: nil)
-                self?.playerNode.scheduleBuffer(silence, completionHandler: nil)
-            }
+            // .loops makes the node repeat this buffer forever
+            playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
             playerNode.play()
             isAudioActive = true
         } catch {
-            // Graceful degradation: audio fails silently, rest of alarm still works
+            // Graceful degradation — rest of alarm (visual + notifications) still works
         }
 
         UIApplication.shared.isIdleTimerDisabled = true
