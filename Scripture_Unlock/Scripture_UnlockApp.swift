@@ -14,6 +14,12 @@ struct Scripture_UnlockApp: App {
     @State private var alarmService = AlarmService.shared
     @State private var triviaService = TriviaService.shared
 
+    init() {
+        // Touch the shared instance now so UNUserNotificationCenter.delegate
+        // is registered before the system delivers any pending responses.
+        _ = AlarmService.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
