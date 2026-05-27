@@ -14,6 +14,7 @@ final class TriviaViewModel {
     enum Phase: Equatable {
         case ringing
         case question(step: Int)
+        case correctMoment(step: Int)   // celebration modal between answer and reveal
         case reveal(step: Int)
         case dismissed
     }
@@ -103,11 +104,17 @@ final class TriviaViewModel {
 
     // MARK: - Private helpers
 
+    /// Called from CorrectMomentView after the celebration modal is dismissed.
+    func continueFromMoment() {
+        guard case .correctMoment(let step) = phase else { return }
+        phase = .reveal(step: step)
+    }
+
     private func handleCorrect(step: Int) {
         triviaService.markSeen(currentQuestion!)
         completedSteps += 1
         fillPickedIndex = nil
-        phase = .reveal(step: step)
+        phase = .correctMoment(step: step)
     }
 
     private func handleWrong(missed: TriviaQuestion, step: Int) {

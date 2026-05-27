@@ -25,6 +25,20 @@ struct TriviaContainerView: View {
                         removal: .opacity
                     ))
 
+            case .correctMoment(let step):
+                if let q = vm.currentQuestion {
+                    CorrectMomentView(
+                        question:      q,
+                        completedStep: step,
+                        totalSteps:    vm.totalSteps,
+                        onContinue:    { vm.continueFromMoment() }
+                    )
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal:   .opacity
+                    ))
+                }
+
             case .reveal:
                 if let q = vm.currentQuestion {
                     RevealView(question: q, vm: vm)
