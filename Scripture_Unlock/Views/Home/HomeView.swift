@@ -51,7 +51,6 @@ struct HomeView: View {
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .navigationTitle("Scripture Unlock")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -91,7 +90,7 @@ struct HomeView: View {
                             .font(.system(size: 14))
                         Text("\(currentStreak)-day streak")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color(hex: "9C7E3B"))
+                            .foregroundStyle(DesignSystem.goldText)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(DesignSystem.pastoralGold.opacity(0.14))

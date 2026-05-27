@@ -1,33 +1,62 @@
 import SwiftUI
 
 /// Central design tokens for Scripture Unlock.
-/// Mirrors the EECC Austin design system (colors_and_type.css).
+/// Every structural color is expressed as a light/dark pair so the UI
+/// automatically tracks the system appearance setting.
 enum DesignSystem {
 
-    // MARK: - Colors
-    static let deepBlue     = Color(hex: "1E3A5F")
-    static let royalBlue    = Color(hex: "2563EB")
+    // MARK: - Adaptive color helper
+
+    /// Returns a Color whose value is resolved at render-time based on the
+    /// current user interface style. Uses UIColor's dynamic provider.
+    static func adaptive(light: Color, dark: Color) -> Color {
+        Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
+
+    // MARK: - Brand / accent (constant — work on both backgrounds)
+
     static let pastoralGold = Color(hex: "C9A961")
-    static let warmCream    = Color(hex: "FAF7F2")
     static let bethanyGreen = Color(hex: "059669")
-    static let ink          = Color(hex: "0B1220")
-    static let slate400     = Color(hex: "94A3B8")
-    static let slate600     = Color(hex: "475569")
-    static let slate700     = Color(hex: "334155")
     static let danger       = Color(hex: "DC2626")
     static let warning      = Color(hex: "D97706")
-    static let surface      = Color(hex: "FFFFFF")
+
+    // MARK: - Adaptive structural colors
+
+    /// Deep navy (light) / sky blue (dark) — primary brand hue
+    static let deepBlue  = adaptive(light: Color(hex: "1E3A5F"), dark: Color(hex: "60A5FA"))
+    /// Royal blue (light) / periwinkle (dark)
+    static let royalBlue = adaptive(light: Color(hex: "2563EB"), dark: Color(hex: "93C5FD"))
+    /// Dark-gold text (light) / pale-gold text (dark)
+    static let goldText  = adaptive(light: Color(hex: "9C7E3B"), dark: Color(hex: "E5C684"))
+    /// Page background — cream (light) / near-black (dark)
+    static let warmCream = adaptive(light: Color(hex: "FAF7F2"), dark: Color(hex: "111827"))
+    /// Card / surface — white (light) / dark slate (dark)
+    static let surface   = adaptive(light: Color(hex: "FFFFFF"),  dark: Color(hex: "1F2937"))
+    /// Primary text — near-black (light) / near-white (dark)
+    static let ink       = adaptive(light: Color(hex: "0B1220"), dark: Color(hex: "F9FAFB"))
+    /// Subtle / decorative text
+    static let slate400  = adaptive(light: Color(hex: "94A3B8"), dark: Color(hex: "6B7280"))
+    /// Secondary text
+    static let slate600  = adaptive(light: Color(hex: "475569"), dark: Color(hex: "9CA3AF"))
+    /// Stronger secondary text
+    static let slate700  = adaptive(light: Color(hex: "334155"), dark: Color(hex: "D1D5DB"))
+    /// Drop shadow — subtle (light) / more prominent (dark)
+    static let shadow1   = adaptive(
+        light: Color.black.opacity(0.06),
+        dark:  Color.black.opacity(0.22)
+    )
 
     // MARK: - Typography
+
     static let serifFont: Font = .custom("Georgia", size: 17)
     static func serif(_ size: CGFloat, italic: Bool = false) -> Font {
         italic ? .custom("Georgia-Italic", size: size) : .custom("Georgia", size: size)
     }
 
-    // MARK: - Shadows
-    static let shadow1 = Color.black.opacity(0.06)
+    // MARK: - Gradients (brand — intentionally fixed, used on dark-overlay cards)
 
-    // MARK: - Gradients
     static let goldGradient = LinearGradient(
         colors: [Color(hex: "E5C684"), Color(hex: "C9A961")],
         startPoint: .top, endPoint: .bottom
@@ -42,7 +71,7 @@ enum DesignSystem {
     )
 }
 
-// MARK: - Color(hex:) initialiser
+// MARK: - Color helpers
 
 extension Color {
     init(hex: String) {
@@ -119,7 +148,7 @@ struct GoldSeal: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: size * 0.44, height: size * 0.44)
-                .foregroundStyle(DesignSystem.deepBlue)
+                .foregroundStyle(Color(hex: "1E3A5F"))
         }
     }
 }
@@ -141,7 +170,12 @@ struct PrimaryButton: View {
         }
     }
 
-    var fg: Color { style == .gold ? DesignSystem.deepBlue : .white }
+    var fg: Color {
+        switch style {
+        case .gold:    return Color(hex: "1E3A5F")
+        case .deepBlue: return .white
+        }
+    }
 
     var body: some View {
         Button(action: action) {
@@ -157,7 +191,7 @@ struct PrimaryButton: View {
             .cornerRadius(14)
             .shadow(color: style == .gold
                 ? DesignSystem.pastoralGold.opacity(0.35)
-                : DesignSystem.deepBlue.opacity(0.22),
+                : Color(hex: "1E3A5F").opacity(0.22),
                     radius: 8, x: 0, y: 4)
         }
     }
@@ -214,7 +248,7 @@ struct TriviaProgressBar: View {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(i < completed ? DesignSystem.pastoralGold
                               : i == completed ? DesignSystem.deepBlue
-                              : Color.black.opacity(0.10))
+                              : Color.primary.opacity(0.10))
                         .frame(height: 4)
                 }
             }

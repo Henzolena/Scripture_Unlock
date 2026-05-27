@@ -133,7 +133,7 @@ struct DayPicker: View {
                         .background(on ? DesignSystem.deepBlue : Color.clear)
                         .cornerRadius(10)
                         .overlay(RoundedRectangle(cornerRadius: 10)
-                            .stroke(on ? Color.clear : Color.black.opacity(0.15), lineWidth: 1))
+                            .stroke(on ? Color.clear : Color.primary.opacity(0.15), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
             }

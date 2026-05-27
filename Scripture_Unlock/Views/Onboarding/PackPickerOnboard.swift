@@ -121,10 +121,10 @@ struct FirstAlarmView: View {
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(isSelected ? .white : DesignSystem.slate600)
                                         .padding(.horizontal, 14).padding(.vertical, 8)
-                                        .background(isSelected ? DesignSystem.deepBlue : Color.black.opacity(0.04))
+                                        .background(isSelected ? DesignSystem.deepBlue : Color.primary.opacity(0.05))
                                         .cornerRadius(999)
                                         .overlay(RoundedRectangle(cornerRadius: 999)
-                                            .stroke(isSelected ? Color.clear : Color.black.opacity(0.10), lineWidth: 0.5))
+                                            .stroke(isSelected ? Color.clear : Color.primary.opacity(0.12), lineWidth: 0.5))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -147,7 +147,7 @@ struct FirstAlarmView: View {
                 .padding(.top, 22)
 
                 HStack(spacing: 10) {
-                    Image(systemName: "shield.fill").foregroundStyle(Color(hex: "9C7E3B"))
+                    Image(systemName: "shield.fill").foregroundStyle(DesignSystem.goldText)
                     Text("Defaults: **3 verses · Regular · \(VersePack.find(profile.activePackId).name)**. Adjust anytime.")
                         .font(.system(size: 12.5)).foregroundStyle(DesignSystem.slate700)
                 }

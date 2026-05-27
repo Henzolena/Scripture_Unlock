@@ -42,7 +42,6 @@ struct TriviaContainerView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: vm.phase)
         .onAppear { if vm.phase == .ringing { vm.begin() } }
-        .preferredColorScheme(.light)
     }
 
     @ViewBuilder

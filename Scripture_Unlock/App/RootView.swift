@@ -51,6 +51,5 @@ struct MainTabView: View {
                 .tag(Tab.settings)
         }
         .tint(DesignSystem.deepBlue)
-        .preferredColorScheme(.light)
     }
 }

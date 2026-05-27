@@ -43,7 +43,7 @@ struct FillView: View {
                         .foregroundStyle(vm.fillPickedIndex == nil ? DesignSystem.slate400 : DesignSystem.deepBlue)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
-                        .background(vm.fillPickedIndex == nil ? Color.black.opacity(0.06) : DesignSystem.pastoralGold)
+                        .background(vm.fillPickedIndex == nil ? Color.primary.opacity(0.06) : DesignSystem.pastoralGold)
                         .cornerRadius(14)
                         .shadow(color: vm.fillPickedIndex == nil ? .clear : DesignSystem.pastoralGold.opacity(0.30),
                                 radius: 8, x: 0, y: 4)
@@ -104,7 +104,7 @@ struct FillView: View {
                         .cornerRadius(14)
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(selected ? Color.black.opacity(0.18) : Color.clear,
+                                .stroke(selected ? Color.primary.opacity(0.18) : Color.clear,
                                         style: StrokeStyle(lineWidth: 1, dash: [4]))
                         )
                         .shadow(color: selected ? .clear : DesignSystem.shadow1, radius: 6, x: 0, y: 2)

@@ -32,7 +32,7 @@ struct RevealView: View {
                             HStack(spacing: 14) {
                                 ZStack {
                                     Circle()
-                                        .fill(correct ? DesignSystem.bethanyGreen : Color.black.opacity(0.05))
+                                        .fill(correct ? DesignSystem.bethanyGreen : Color.primary.opacity(0.06))
                                         .frame(width: 34, height: 34)
                                     if correct {
                                         Image(systemName: "checkmark")

@@ -58,7 +58,6 @@ struct StatsView: View {
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .navigationTitle("Streak")
-            .toolbarColorScheme(.light, for: .navigationBar)
         }
     }
 
@@ -95,7 +94,7 @@ struct StatsView: View {
                                   bar.today         ? DesignSystem.pastoralGold :
                                   bar.snoozed       ? DesignSystem.warning :
                                   bar.fraction > 0  ? DesignSystem.deepBlue :
-                                                      Color.black.opacity(0.08))
+                                                      Color.primary.opacity(0.08))
                             .frame(height: max(8, CGFloat(bar.fraction < 0 ? 0.25 : bar.fraction) * 90))
                         Text(bar.day).font(.system(size: 11, weight: bar.today ? .bold : .medium))
                             .foregroundStyle(bar.today ? DesignSystem.pastoralGold : DesignSystem.slate600)
@@ -131,7 +130,7 @@ struct MetricCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value).font(.system(size: 28, weight: .bold, design: .monospaced))
-                .foregroundStyle(gold ? Color(hex: "9C7E3B") : DesignSystem.deepBlue)
+                .foregroundStyle(gold ? DesignSystem.goldText : DesignSystem.deepBlue)
             Text(label).font(.system(size: 12)).foregroundStyle(DesignSystem.slate600)
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).cardStyle()

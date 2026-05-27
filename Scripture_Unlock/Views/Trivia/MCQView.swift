@@ -80,7 +80,7 @@ struct OptionButton: View {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(Color.black.opacity(0.06))
+                        .fill(Color.primary.opacity(0.08))
                         .frame(width: 36, height: 36)
                     Text(letter)
                         .font(.system(size: 14, weight: .bold))

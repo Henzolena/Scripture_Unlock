@@ -31,7 +31,6 @@ struct PacksView: View {
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .navigationTitle("Verse Packs")
-            .toolbarColorScheme(.light, for: .navigationBar)
         }
     }
 
