@@ -1,15 +1,19 @@
 import Foundation
 import UserNotifications
 
-// AlarmKit is a system framework added in iOS 26.
-// To enable it: Target → Signing & Capabilities → + → AlarmKit
-// Until the capability is added this guard keeps the rest of the app buildable.
-#if canImport(AlarmKit)
-import AlarmKit
-#endif
+// MARK: - AlarmService
+//
+// AlarmKit (iOS 26) requires Apple entitlement approval before it can be used:
+//   developer.apple.com/contact/request/notifications-critical-alerts-entitlement
+//
+// Until approved, this service:
+//   - Schedules alarms via UNUserNotificationCenter (standard notifications)
+//   - Exposes fireTestAlarm() so the full trivia UI can be tested immediately
+//
+// When AlarmKit is approved:
+//   1. Add the AlarmKit capability in Target → Signing & Capabilities
+//   2. Replace the UNUserNotificationCenter scheduling below with ALAlarmManager calls
 
-/// Wraps AlarmKit. Only correct trivia answers may call dismissAlarm().
-/// All other dismissal paths are handled by AlarmKit's system persistence.
 @Observable
 final class AlarmService {
 
@@ -18,12 +22,11 @@ final class AlarmService {
     /// The alarm currently ringing (nil = nothing active).
     var activeAlarm: Alarm?
 
-    /// Whether the app has Critical Alerts permission.
+    /// Whether the app has notification permission.
     var hasCriticalAlertsPermission = false
 
     private init() {
         Task { await requestPermissions() }
-        observeAlarmEvents()
     }
 
     // MARK: - Permissions
@@ -31,40 +34,31 @@ final class AlarmService {
     private func requestPermissions() async {
         let center = UNUserNotificationCenter.current()
         let granted = try? await center.requestAuthorization(
-            options: [.alert, .sound, .badge, .criticalAlert]
+            options: [.alert, .sound, .badge]
         )
         hasCriticalAlertsPermission = granted ?? false
     }
 
-    // MARK: - Scheduling
+    // MARK: - Scheduling (UNUserNotificationCenter fallback)
 
     func schedule(_ alarm: Alarm) async throws {
-#if canImport(AlarmKit)
-        let attributes = ALAlarmAttributes(
-            title: alarm.label,
-            body: "Answer \(alarm.effectiveQuestionCount) verses to silence.",
-            sound: ALAlarmSound(named: alarm.toneIdentifier),
-            style: .countdown
+        let content = UNMutableNotificationContent()
+        content.title = alarm.label
+        content.body = "Answer \(alarm.effectiveQuestionCount) verses to silence."
+        content.sound = .defaultCritical
+
+        let comps = DateComponents(
+            hour: alarm.isAM ? alarm.hour : alarm.hour + 12,
+            minute: alarm.minute
         )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: !alarm.repeatDays.isEmpty)
 
-        let schedule: ALAlarmSchedule
-        if alarm.repeatDays.isEmpty {
-            schedule = .once(at: alarm.nextFireDate)
-        } else {
-            let weekdays = alarm.repeatDays.map { $0 + 1 }
-            schedule = .weekly(on: weekdays, at: DateComponents(
-                hour: alarm.isAM ? alarm.hour : alarm.hour + 12,
-                minute: alarm.minute
-            ))
-        }
-
-        let request = ALAlarmRequest(
+        let request = UNNotificationRequest(
             identifier: alarm.id.uuidString,
-            attributes: attributes,
-            schedule: schedule
+            content: content,
+            trigger: trigger
         )
-        try await ALAlarmManager.shared.add(request)
-#endif
+        try await UNUserNotificationCenter.current().add(request)
     }
 
     func rescheduleAll(_ alarms: [Alarm]) async {
@@ -74,45 +68,21 @@ final class AlarmService {
     }
 
     func cancel(_ alarm: Alarm) async {
-#if canImport(AlarmKit)
-        await ALAlarmManager.shared.removePendingAlarmRequests(
-            withIdentifiers: [alarm.id.uuidString]
-        )
-#endif
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [alarm.id.uuidString])
     }
 
-    /// ONLY path to silence — called by TriviaViewModel after all correct answers.
+    /// Called by TriviaViewModel after all correct answers — silences the alarm.
     func dismissAlarm(_ alarm: Alarm) async {
-#if canImport(AlarmKit)
-        await ALAlarmManager.shared.dismissAlarm(withIdentifier: alarm.id.uuidString)
-#endif
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [alarm.id.uuidString])
         await MainActor.run { activeAlarm = nil }
     }
 
-    /// Simulator / dev testing: fires the trivia flow immediately without AlarmKit.
+    /// Simulator / dev testing: triggers the full trivia flow immediately.
     func fireTestAlarm() {
         let test = Alarm(label: "Test alarm", hour: 6, minute: 0)
         activeAlarm = test
-    }
-
-    // MARK: - Observe incoming alarms
-
-    private func observeAlarmEvents() {
-#if canImport(AlarmKit)
-        NotificationCenter.default.addObserver(
-            forName: .ALAlarmDidFire,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let alarmId = notification.userInfo?["identifier"] as? String,
-                  let uuid = UUID(uuidString: alarmId) else { return }
-            NotificationCenter.default.post(
-                name: .scriptureUnlockAlarmFired,
-                object: nil,
-                userInfo: ["alarmId": uuid]
-            )
-        }
-#endif
     }
 }
 
