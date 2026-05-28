@@ -37,9 +37,10 @@ struct BibleView: View {
             .background(DesignSystem.warmCream)
         }
         .onAppear {
-            // Seed from user's parallelLanguage preference; fall back to Amharic
+            // Seed from user's parallelLanguage preference; fall back to Amharic.
+            // Migrate legacy "en" (KJV) → "niv" since we now use NIV for English.
             if let lang = profile?.parallelLanguage, !lang.isEmpty {
-                selectedLanguage = lang
+                selectedLanguage = lang == "en" ? "niv" : lang
             }
             Task { await loadBooks() }
         }
@@ -53,9 +54,9 @@ struct BibleView: View {
     private var languageMenu: some View {
         Menu {
             Button {
-                selectedLanguage = "en"
+                selectedLanguage = "niv"
             } label: {
-                Label("English", systemImage: selectedLanguage == "en" ? "checkmark" : "")
+                Label("🇺🇸 English (NIV)", systemImage: selectedLanguage == "niv" ? "checkmark" : "")
             }
 
             ForEach(EthiopianBibleService.languages, id: \.code) { lang in
@@ -84,7 +85,7 @@ struct BibleView: View {
     }
 
     private var currentLanguageLabel: String {
-        if selectedLanguage == "en" { return "English" }
+        if selectedLanguage == "niv" { return "English (NIV)" }
         return EthiopianBibleService.languages
             .first { $0.code == selectedLanguage }?.nativeName ?? selectedLanguage
     }
