@@ -238,7 +238,9 @@ final class QuestionGeneratorAgent {
         guard !q.verseRef.isEmpty,
               !q.verseText.isEmpty,
               q.options.count == 4,
-              q.answerIndex >= 0, q.answerIndex < 4
+              q.answerIndex >= 0,
+              q.answerIndex < q.options.count,  // guard against out-of-range crash
+              !q.options.contains(where: { $0.isEmpty })
         else { return false }
 
         // Fill-specific: pre + post must not both be empty

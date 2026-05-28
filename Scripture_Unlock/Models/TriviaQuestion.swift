@@ -23,7 +23,12 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
 
     enum Kind: String, Codable { case mcq, fill }
 
-    var correctAnswer: String { options[answerIndex] }
+    /// Safe accessor — never crashes even if Gemini returned a bad answerIndex.
+    var correctAnswer: String {
+        guard !options.isEmpty else { return "" }
+        let safeIndex = max(0, min(answerIndex, options.count - 1))
+        return options[safeIndex]
+    }
 
     /// Human-readable label shown in the question header.
     var displayPrompt: String {
