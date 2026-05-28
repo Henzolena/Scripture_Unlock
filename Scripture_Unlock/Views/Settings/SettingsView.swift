@@ -61,6 +61,11 @@ struct SettingsView: View {
                         alarmService.fireTestAlarm()
                     }
                     .foregroundStyle(DesignSystem.royalBlue)
+
+                    NavigationLink("Test AI question generator") {
+                        AITestView()
+                    }
+                    .foregroundStyle(DesignSystem.royalBlue)
                 }
 
                 Section {
