@@ -257,17 +257,11 @@ struct EthiopianVerse: Decodable {
 struct CoverageBook: Decodable {
     let number:       Int
     let abbreviation: String
-    let name:         String
-    let englishName:  String
+    let name:         String   // localized name (or English if no translation)
     let testament:    String
     let chapters:     Int
     let text:         Bool   // verses exist in DB
     let audio:        Bool   // at least one chapter has audio
-
-    enum CodingKeys: String, CodingKey {
-        case number, abbreviation, name, testament, chapters, text, audio
-        case englishName = "english_name"
-    }
 }
 
 /// Top-level response from GET /api/v1/coverage/{lang}
