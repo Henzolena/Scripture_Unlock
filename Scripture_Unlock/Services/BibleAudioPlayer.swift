@@ -52,12 +52,12 @@ final class BibleAudioPlayer {
     private let baseURL = "https://ethiopian-bible-api-production.up.railway.app/api/v1"
     private let session = URLSession.shared
 
-    private var player:            AVPlayer?
-    private var timeObserver:      Any?
-    private var statusObservation: NSKeyValueObservation?
-    private var endObserver:       NSObjectProtocol?
+    @ObservationIgnored private var player:            AVPlayer?
+    @ObservationIgnored private var timeObserver:      Any?
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
+    @ObservationIgnored private var endObserver:       NSObjectProtocol?
     /// Composite key of the currently loaded audio so we skip re-loading the same chapter.
-    private var loadedKey = ""
+    @ObservationIgnored private var loadedKey = ""
 
     // MARK: - Init
 
@@ -91,14 +91,20 @@ final class BibleAudioPlayer {
 
         do {
             let (data, response) = try await session.data(from: infoURL)
+            // API returns 404 when audio is unavailable — HTTP status is source of truth.
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 await MainActor.run { isLoading = false }
                 return
             }
-            // Parse optional source name from the info JSON
-            if let json   = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let source = json["source"] as? String {
-                await MainActor.run { sourceName = source }
+            // Extra safety: also check the `available` flag in JSON body.
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                guard json["available"] as? Bool == true else {
+                    await MainActor.run { isLoading = false }
+                    return
+                }
+                if let source = json["source"] as? String {
+                    await MainActor.run { sourceName = source }
+                }
             }
         } catch {
             await MainActor.run { isLoading = false }
