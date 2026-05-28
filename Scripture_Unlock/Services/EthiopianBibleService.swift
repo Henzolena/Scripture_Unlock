@@ -125,6 +125,81 @@ final class EthiopianBibleService {
     }
 }
 
+// MARK: - Bible Navigator API
+
+extension EthiopianBibleService {
+
+    // MARK: Books
+
+    /// Fetch all 66 books in the requested language.
+    /// Results are cached in memory for the session.
+    func books(language: String) async -> [BibleBook] {
+        if let cached = bookCache[language] { return cached }
+        guard let url = URL(string: "\(baseURL)/\(language)/books") else { return [] }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
+            let result = try JSONDecoder().decode([BibleBook].self, from: data)
+            bookCache[language] = result
+            return result
+        } catch {
+            print("[EthiopianBibleService] books(\(language)) error: \(error)")
+            return []
+        }
+    }
+
+    // MARK: Chapter
+
+    /// Fetch all verses in a chapter by book abbreviation (e.g. "PSA") + chapter number.
+    /// Results are cached in memory for the session.
+    func chapter(book abbreviation: String, chapter: Int, language: String) async -> BibleChapter? {
+        let key = "\(language)-\(abbreviation)-\(chapter)"
+        if let cached = chapterCache[key] { return cached }
+        let urlString = "\(baseURL)/\(language)/books/\(abbreviation)/\(chapter)"
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let result = try JSONDecoder().decode(BibleChapter.self, from: data)
+            chapterCache[key] = result
+            return result
+        } catch {
+            print("[EthiopianBibleService] chapter(\(abbreviation) \(chapter), \(language)) error: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: Verse of the Day
+
+    /// Deterministic verse of the day — changes daily.
+    func verseOfTheDay(language: String) async -> EthiopianVerse? {
+        guard let url = URL(string: "\(baseURL)/\(language)/votd") else { return nil }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(EthiopianVerse.self, from: data)
+        } catch { return nil }
+    }
+}
+
+// MARK: - Navigator caches (stored on the singleton)
+
+// Swift does not allow stored properties in extensions, so we use a private
+// wrapper held on the main class. Access them via the computed properties below.
+private var _bookCache:    [String: [BibleBook]]    = [:]
+private var _chapterCache: [String: BibleChapter]   = [:]
+
+extension EthiopianBibleService {
+    fileprivate var bookCache:    [String: [BibleBook]]  {
+        get { _bookCache }
+        set { _bookCache = newValue }
+    }
+    fileprivate var chapterCache: [String: BibleChapter] {
+        get { _chapterCache }
+        set { _chapterCache = newValue }
+    }
+}
+
 // MARK: - Response model
 
 struct EthiopianVerse: Decodable {
@@ -142,5 +217,47 @@ struct EthiopianVerse: Decodable {
         case verse
         case text
         case language
+    }
+}
+
+// MARK: - Bible Navigator models
+
+/// One of the 66 canonical Bible books returned by GET /{lang}/books
+struct BibleBook: Decodable, Identifiable, Hashable {
+    let number:       Int      // 1–66 — used as stable id
+    let englishName:  String   // always English regardless of language
+    let abbreviation: String   // e.g. "GEN", "PSA", "JHN"
+    let testament:    String   // "OT" or "NT"
+    let chapterCount: Int      // total chapters in this book
+    let name:         String   // localized name in the requested language
+
+    var id: Int { number }
+
+    enum CodingKeys: String, CodingKey {
+        case number
+        case englishName  = "english_name"
+        case abbreviation
+        case testament
+        case chapterCount = "chapter_count"
+        case name
+    }
+}
+
+/// A full chapter returned by GET /{lang}/books/{abbrev}/{chapter}
+struct BibleChapter: Decodable {
+    let book:       String          // book abbreviation
+    let bookName:   String          // localized book name
+    let chapter:    Int
+    let verseCount: Int
+    let language:   String
+    let verses:     [EthiopianVerse]
+
+    enum CodingKeys: String, CodingKey {
+        case book
+        case bookName   = "book_name"
+        case chapter
+        case verseCount = "verse_count"
+        case language
+        case verses
     }
 }

@@ -40,7 +40,7 @@ struct RootView: View {
 struct MainTabView: View {
     @State private var selectedTab: Tab = .home
 
-    enum Tab { case home, stats, packs, settings }
+    enum Tab { case home, stats, packs, bible, settings }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -55,6 +55,10 @@ struct MainTabView: View {
             PacksView()
                 .tabItem { Label("Verses",   systemImage: "book.fill") }
                 .tag(Tab.packs)
+
+            BibleView()
+                .tabItem { Label("Bible",    systemImage: "books.vertical.fill") }
+                .tag(Tab.bible)
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
