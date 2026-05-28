@@ -61,8 +61,9 @@ struct BibleReaderView: View {
             async let textLoad: () = loadChapter()
             async let audioLoad: () = audio.load(
                 language: language,
-                book: book.abbreviation,
-                chapter: chapter
+                book:     book.abbreviation,
+                bookName: book.englishName,
+                chapter:  chapter
             )
             _ = await (textLoad, audioLoad)
         }
