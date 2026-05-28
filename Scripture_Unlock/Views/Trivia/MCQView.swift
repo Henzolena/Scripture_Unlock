@@ -62,6 +62,16 @@ struct MCQView: View {
                 .tracking(2)
                 .textCase(.uppercase)
                 .foregroundStyle(DesignSystem.pastoralGold)
+
+            if question.isAIGenerated {
+                Text("✦ AI")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(DesignSystem.pastoralGold.opacity(0.7))
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(DesignSystem.pastoralGold.opacity(0.12))
+                    .clipShape(Capsule())
+            }
         }
     }
 }

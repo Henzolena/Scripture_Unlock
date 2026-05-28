@@ -70,6 +70,25 @@ final class QuestionGeneratorAgent {
         saveCacheToDisk(key: key)
     }
 
+    /// Directly add pre-validated questions to the cache (used by AITestView
+    /// so that test-run results are immediately available for the next alarm).
+    func addToCache(_ questions: [TriviaQuestion]) {
+        for q in questions {
+            let key = cacheKey(q.packId, q.difficulty)
+            var slot = cache[key] ?? []
+            if !slot.contains(where: { $0.id == q.id || $0.verseRef == q.verseRef }) {
+                slot.append(q)
+            }
+            cache[key] = Array(slot.prefix(maxCacheSize))
+            saveCacheToDisk(key: key)
+        }
+    }
+
+    /// Total number of AI questions ready across all slots.
+    var totalCachedCount: Int {
+        cache.values.reduce(0) { $0 + $1.count }
+    }
+
     // MARK: - Generation pipeline
 
     private func generateAndCache(packId: String, difficulty: Difficulty) async {

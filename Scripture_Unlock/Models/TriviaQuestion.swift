@@ -30,6 +30,11 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
         return options[safeIndex]
     }
 
+    /// True when this question came from Gemini (not the bundled static samples).
+    var isAIGenerated: Bool {
+        !TriviaQuestion.samples.contains(where: { $0.id == id })
+    }
+
     /// Human-readable label shown in the question header.
     var displayPrompt: String {
         switch kind {

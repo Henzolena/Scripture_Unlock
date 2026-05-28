@@ -65,6 +65,14 @@ struct AITestView: View {
                     }
                     .disabled(isGenerating || GeminiService.shared.apiKey.isEmpty)
                     .tint(DesignSystem.royalBlue)
+
+                    if !results.isEmpty {
+                        let passed = results.filter(\.passed).count
+                        Label("\(passed) question\(passed == 1 ? "" : "s") saved to alarm cache",
+                              systemImage: "checkmark.seal.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.green)
+                    }
                 }
 
                 // ── Error ─────────────────────────────────────────────────
@@ -154,18 +162,27 @@ struct AITestView: View {
 
                 // Validate each one and build results
                 var testResults: [TestResult] = []
+                var passedQuestions: [TriviaQuestion] = []
                 for q in raw {
                     let apiText = await EthiopianBibleService.shared.verse(
                         ref: q.verseRef, language: "en"
                     )
                     let overlap = wordOverlap(q.verseText, apiText ?? "")
+                    let passed  = apiText != nil && overlap >= 0.40
+                        && q.answerIndex < q.options.count
+                        && q.options.count == 4
                     testResults.append(TestResult(
                         question:  q,
                         apiText:   apiText,
                         overlap:   overlap,
-                        passed:    apiText != nil && overlap >= 0.40
+                        passed:    passed
                     ))
+                    if passed { passedQuestions.append(q) }
                 }
+
+                // Save validated questions to the agent cache so the next
+                // alarm immediately uses AI questions instead of static samples
+                QuestionGeneratorAgent.shared.addToCache(passedQuestions)
 
                 await MainActor.run {
                     results       = testResults
