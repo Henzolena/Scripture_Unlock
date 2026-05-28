@@ -13,7 +13,9 @@ final class UserProfile {
     var difficultyRaw: String = Difficulty.regular.rawValue
     var snoozeTaxEnabled: Bool = true
     var sabbathModeEnabled: Bool = true
-    var amharicAlongside: Bool = false
+    /// Language code for the parallel translation shown alongside English.
+    /// "am" = Amharic · "or" = Oromo · "ti" = Tigrigna · "" = off
+    var parallelLanguage: String = ""
     var accountabilityPartnerEmail: String = ""
     var createdAt: Date = Date()
 

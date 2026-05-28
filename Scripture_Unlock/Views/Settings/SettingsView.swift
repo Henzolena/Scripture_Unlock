@@ -19,11 +19,15 @@ struct SettingsView: View {
                         ForEach(Translation.allCases, id: \.self) { t in Text(t.rawValue).tag(t.rawValue) }
                     }
 
-                    Toggle("Amharic alongside English", isOn: Binding(
-                        get: { profile?.amharicAlongside ?? false },
-                        set: { profile?.amharicAlongside = $0 }
-                    ))
-                    .tint(DesignSystem.bethanyGreen)
+                    Picker("Parallel translation", selection: Binding(
+                        get: { profile?.parallelLanguage ?? "" },
+                        set: { profile?.parallelLanguage = $0 }
+                    )) {
+                        Text("Off").tag("")
+                        Text("አማርኛ  (Amharic)").tag("am")
+                        Text("Afaan Oromoo  (Oromo)").tag("or")
+                        Text("ትግርኛ  (Tigrigna)").tag("ti")
+                    }
                 }
 
                 Section("Alarm") {

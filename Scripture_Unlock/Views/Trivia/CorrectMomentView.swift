@@ -11,13 +11,16 @@ struct CorrectMomentView: View {
     let totalSteps: Int
     let onContinue: () -> Void
 
-    // MARK: - SwiftData + Amharic
+    // MARK: - SwiftData + parallel translation
 
     @Query private var profiles: [UserProfile]
-    @State private var amharicText: String? = nil
+    @State private var parallelText: String? = nil
 
-    private var amharicEnabled: Bool {
-        profiles.first?.amharicAlongside ?? false
+    private var parallelLanguage: String {
+        profiles.first?.parallelLanguage ?? ""
+    }
+    private var langInfo: EthiopianBibleService.LanguageInfo? {
+        EthiopianBibleService.info(for: parallelLanguage)
     }
 
     // MARK: - Animation states
@@ -91,8 +94,8 @@ struct CorrectMomentView: View {
         .onAppear { runAnimations() }
         .onDisappear { autoDismissTask?.cancel() }
         .task {
-            if amharicEnabled {
-                amharicText = await BetezionService.shared.amharic(forRef: question.verseRef)
+            if !parallelLanguage.isEmpty {
+                parallelText = await EthiopianBibleService.shared.verse(ref: question.verseRef, language: parallelLanguage)
             }
         }
         .preferredColorScheme(.dark)
@@ -167,24 +170,24 @@ struct CorrectMomentView: View {
                 .lineLimit(5)
                 .padding(.horizontal, 36)
 
-            // Amharic translation (shown only when the setting is on + loaded)
-            if amharicEnabled {
+            // Parallel translation (shown only when a language is selected + loaded)
+            if let info = langInfo {
                 Divider()
                     .background(.white.opacity(0.15))
                     .padding(.horizontal, 36)
                     .padding(.top, 4)
 
                 HStack(spacing: 6) {
-                    Text("🇪🇹")
+                    Text(info.flagEmoji)
                         .font(.system(size: 11))
-                    Text("አማርኛ")
+                    Text(info.nativeName)
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1)
                         .foregroundStyle(DesignSystem.pastoralGold)
                 }
 
-                if let amharic = amharicText {
-                    Text(amharic)
+                if let text = parallelText {
+                    Text(text)
                         .font(.system(size: 14))
                         .foregroundStyle(.white.opacity(0.70))
                         .multilineTextAlignment(.center)

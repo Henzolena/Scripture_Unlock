@@ -2,17 +2,20 @@ import SwiftUI
 import SwiftData
 
 /// Shown after a correct answer — highlights the right option, reveals the full verse.
-/// When the user has enabled "Amharic alongside English" in Settings, the verse card
-/// also shows the Amharic text fetched from api.betezion.com.
+/// When the user has selected a parallel language in Settings, the verse card also shows
+/// that translation fetched from the Ethiopian Bible API.
 struct RevealView: View {
     let question: TriviaQuestion
     @Bindable var vm: TriviaViewModel
     @Query private var profiles: [UserProfile]
 
-    @State private var amharicText: String? = nil
+    @State private var parallelText: String? = nil
 
-    private var amharicEnabled: Bool {
-        profiles.first?.amharicAlongside ?? false
+    private var parallelLanguage: String {
+        profiles.first?.parallelLanguage ?? ""
+    }
+    private var langInfo: EthiopianBibleService.LanguageInfo? {
+        EthiopianBibleService.info(for: parallelLanguage)
     }
 
     var body: some View {
@@ -94,8 +97,8 @@ struct RevealView: View {
             .padding(.bottom, 32)
         }
         .task {
-            if amharicEnabled {
-                amharicText = await BetezionService.shared.amharic(forRef: question.verseRef)
+            if !parallelLanguage.isEmpty {
+                parallelText = await EthiopianBibleService.shared.verse(ref: question.verseRef, language: parallelLanguage)
             }
         }
     }
@@ -115,22 +118,22 @@ struct RevealView: View {
                 .foregroundStyle(DesignSystem.slate600)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Amharic text (shown only when enabled + loaded)
-            if amharicEnabled {
+            // Parallel translation (shown only when a language is selected + loaded)
+            if let info = langInfo {
                 Divider()
                     .padding(.vertical, 4)
 
                 HStack(spacing: 6) {
-                    Text("🇪🇹")
+                    Text(info.flagEmoji)
                         .font(.system(size: 11))
-                    Text("አማርኛ")
+                    Text(info.nativeName)
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1)
                         .foregroundStyle(DesignSystem.pastoralGold)
                 }
 
-                if let amharic = amharicText {
-                    Text(amharic)
+                if let text = parallelText {
+                    Text(text)
                         .font(.system(size: 15))
                         .foregroundStyle(DesignSystem.slate700)
                         .fixedSize(horizontal: false, vertical: true)
