@@ -19,6 +19,16 @@ final class TriviaViewModel {
         case dismissed
     }
 
+    // MARK: - Translated fill
+
+    /// Reconstructed fill structure for a question when a parallel language is active.
+    struct TranslatedFill {
+        let pre:         String
+        let post:        String
+        let options:     [String]   // shuffled; includes correct answer
+        let answerIndex: Int        // index of correct answer in `options`
+    }
+
     // MARK: - State
 
     private(set) var phase: Phase = .ringing
@@ -30,6 +40,12 @@ final class TriviaViewModel {
     private var shownIds: Set<String> = []
 
     var fillPickedIndex: Int? = nil
+
+    /// Language code for translated quiz content ("am", "or", "ti", or "" = English only)
+    private(set) var parallelLanguage: String = ""
+
+    /// Translated fill data keyed by question ID. Populated async after each question loads.
+    private(set) var translatedFills: [String: TranslatedFill] = [:]
 
     private let alarm: Alarm
     private let triviaService: TriviaService
@@ -48,11 +64,14 @@ final class TriviaViewModel {
 
     // MARK: - Actions
 
-    func begin() {
+    /// Call with the user's selected `parallelLanguage` from UserProfile.
+    func begin(language: String = "") {
+        parallelLanguage = language
         triviaService.resetSession()
         shownIds = []
         lastMissedQuestion = nil
         completedSteps = 0
+        translatedFills = [:]
         loadQuestion(forStep: 0)
         phase = .question(step: 0)
     }
@@ -77,7 +96,10 @@ final class TriviaViewModel {
               let q = currentQuestion,
               let picked = fillPickedIndex else { return }
 
-        if picked == q.answerIndex {
+        // Use translated answer index when fill has been reconstructed in another language
+        let correctIndex = translatedFills[q.id]?.answerIndex ?? q.answerIndex
+
+        if picked == correctIndex {
             handleCorrect(step: step)
         } else {
             handleWrong(missed: q, step: step)
@@ -102,13 +124,13 @@ final class TriviaViewModel {
         Task { await alarmService.dismissAlarm(alarm) }
     }
 
-    // MARK: - Private helpers
-
     /// Called from CorrectMomentView after the celebration modal is dismissed.
     func continueFromMoment() {
         guard case .correctMoment(let step) = phase else { return }
         phase = .reveal(step: step)
     }
+
+    // MARK: - Private helpers
 
     private func handleCorrect(step: Int) {
         triviaService.markSeen(currentQuestion!)
@@ -130,7 +152,10 @@ final class TriviaViewModel {
             excluding: shownIds
         )
         currentQuestion = replacement
-        if let r = replacement { shownIds.insert(r.id) }
+        if let r = replacement {
+            shownIds.insert(r.id)
+            prefetchTranslation(for: r)
+        }
     }
 
     private func loadQuestion(forStep step: Int) {
@@ -141,7 +166,73 @@ final class TriviaViewModel {
             excluding: shownIds
         )
         currentQuestion = q
-        if let q { shownIds.insert(q.id) }
+        if let q {
+            shownIds.insert(q.id)
+            prefetchTranslation(for: q)
+        }
+    }
+
+    // MARK: - Translation prefetch
+
+    private func prefetchTranslation(for question: TriviaQuestion) {
+        guard !parallelLanguage.isEmpty, question.kind == .fill else { return }
+        let qId  = question.id
+        let lang = parallelLanguage
+        let ref  = question.verseRef
+
+        Task {
+            guard let verseText = await EthiopianBibleService.shared.verse(ref: ref, language: lang) else { return }
+            if let fill = buildTranslatedFill(from: verseText, question: question) {
+                await MainActor.run { self.translatedFills[qId] = fill }
+            }
+        }
+    }
+
+    /// Rebuild a fill question from a translated verse.
+    ///
+    /// Strategy: the blank falls at the same *word index* as in the English verse
+    /// (determined by counting words in fillPre). Works well for Amharic, Oromo,
+    /// and Tigrigna translations that preserve similar sentence structure.
+    private func buildTranslatedFill(from translatedText: String, question: TriviaQuestion) -> TranslatedFill? {
+        guard question.kind == .fill else { return nil }
+
+        // How many words precede the blank in the English verse?
+        let preWordCount = (question.fillPre ?? "")
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }.count
+
+        // Split translated verse into words
+        let words = translatedText
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+
+        guard preWordCount < words.count else { return nil }
+
+        let blankWord = words[preWordCount]
+        let pre  = words[..<preWordCount].joined(separator: " ")
+        let post = preWordCount + 1 < words.count
+            ? words[(preWordCount + 1)...].joined(separator: " ")
+            : ""
+
+        // Build 3 unique distractors from other words in the verse
+        var seen = Set<String>([blankWord])
+        var distractors: [String] = []
+        for word in words.shuffled() {
+            guard !seen.contains(word), !word.isEmpty else { continue }
+            seen.insert(word)
+            distractors.append(word)
+            if distractors.count == 3 { break }
+        }
+
+        // Need at least 3 distractors for a meaningful question
+        guard distractors.count == 3 else { return nil }
+
+        // Shuffle options so the correct answer isn't always last
+        var options = distractors + [blankWord]
+        options.shuffle()
+        let answerIndex = options.firstIndex(of: blankWord) ?? 0
+
+        return TranslatedFill(pre: pre, post: post, options: options, answerIndex: answerIndex)
     }
 
     // MARK: - Computed helpers

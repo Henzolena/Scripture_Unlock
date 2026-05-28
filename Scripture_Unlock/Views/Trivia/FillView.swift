@@ -4,8 +4,14 @@ struct FillView: View {
     let question: TriviaQuestion
     @Bindable var vm: TriviaViewModel
 
+    /// Translated fill structure when a parallel language is active.
+    private var translated: TriviaViewModel.TranslatedFill? {
+        vm.translatedFills[question.id]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // ── Book / step badge ───────────────────────────────────────────
             HStack(spacing: 6) {
                 Image(systemName: "book.fill")
                     .font(.system(size: 12))
@@ -18,22 +24,47 @@ struct FillView: View {
             .padding(.horizontal, 24)
             .padding(.top, 28)
 
-            Text("Complete the verse")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(DesignSystem.slate600)
+            // ── Language pill (shown when translating) ──────────────────────
+            if let info = EthiopianBibleService.info(for: vm.parallelLanguage) {
+                HStack(spacing: 5) {
+                    Text(info.flagEmoji).font(.system(size: 10))
+                    Text(info.nativeName)
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(DesignSystem.pastoralGold)
+                    if translated == nil {
+                        // Still loading translation
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .tint(DesignSystem.pastoralGold)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(DesignSystem.pastoralGold.opacity(0.10))
+                .clipShape(Capsule())
                 .padding(.horizontal, 24)
-                .padding(.top, 10)
+                .padding(.top, 8)
+            } else {
+                Text("Complete the verse")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DesignSystem.slate600)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+            }
 
+            // ── Verse text with blank ──────────────────────────────────────
             verseText
                 .padding(.horizontal, 24)
                 .padding(.top, 12)
 
+            // ── Answer chips ───────────────────────────────────────────────
             chipGrid
                 .padding(.horizontal, 24)
                 .padding(.top, 28)
 
             Spacer(minLength: 24)
 
+            // ── Confirm / clear ────────────────────────────────────────────
             VStack(spacing: 12) {
                 Button {
                     vm.confirmFill()
@@ -68,20 +99,22 @@ struct FillView: View {
     // MARK: - Verse with blank
 
     private var verseText: some View {
-        let pre    = question.fillPre  ?? ""
-        let post   = question.fillPost ?? ""
-        let filled = vm.fillPickedIndex.map { question.options[$0] }
+        // Use translated fill when available, otherwise fall back to English
+        let pre    = translated?.pre  ?? question.fillPre  ?? ""
+        let post   = translated?.post ?? question.fillPost ?? ""
+        let opts   = translated?.options ?? question.options
+        let filled = vm.fillPickedIndex.map { opts[$0] }
 
         var preAttr = AttributedString(pre + " ")
-        preAttr.swiftUI.font           = DesignSystem.serif(26, italic: true)
+        preAttr.swiftUI.font            = DesignSystem.serif(26, italic: true)
         preAttr.swiftUI.foregroundColor = DesignSystem.ink
 
         var blankAttr = AttributedString(filled ?? "          ")
-        blankAttr.swiftUI.font           = .system(size: 22, weight: .bold)
+        blankAttr.swiftUI.font            = .system(size: 22, weight: .bold)
         blankAttr.swiftUI.foregroundColor = filled == nil ? DesignSystem.slate400 : DesignSystem.deepBlue
 
         var postAttr = AttributedString(" " + post)
-        postAttr.swiftUI.font           = DesignSystem.serif(26, italic: true)
+        postAttr.swiftUI.font            = DesignSystem.serif(26, italic: true)
         postAttr.swiftUI.foregroundColor = DesignSystem.ink
 
         return Text(preAttr + blankAttr + postAttr)
@@ -90,9 +123,12 @@ struct FillView: View {
     // MARK: - Chip grid
 
     private var chipGrid: some View {
+        // Use translated options when available
+        let opts = translated?.options ?? question.options
         let cols = [GridItem(.flexible()), GridItem(.flexible())]
+
         return LazyVGrid(columns: cols, spacing: 10) {
-            ForEach(Array(question.options.enumerated()), id: \.offset) { index, word in
+            ForEach(Array(opts.enumerated()), id: \.offset) { index, word in
                 let selected = vm.fillPickedIndex == index
                 Button {
                     vm.pickFillOption(index: index)

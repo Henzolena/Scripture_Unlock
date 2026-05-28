@@ -1,9 +1,13 @@
 import SwiftUI
+import SwiftData
 
 /// Hosts the trivia state machine — routes between MCQ, Fill, Reveal, Dismissed.
 struct TriviaContainerView: View {
     let alarm: Alarm
     @State private var vm: TriviaViewModel
+    @Query private var profiles: [UserProfile]
+
+    private var parallelLanguage: String { profiles.first?.parallelLanguage ?? "" }
 
     init(alarm: Alarm) {
         self.alarm = alarm
@@ -15,7 +19,7 @@ struct TriviaContainerView: View {
             switch vm.phase {
             case .ringing:
                 Color(DesignSystem.warmCream).ignoresSafeArea()
-                    .onAppear { vm.begin() }
+                    .onAppear { vm.begin(language: parallelLanguage) }
 
             case .question:
                 questionView
@@ -55,7 +59,7 @@ struct TriviaContainerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: vm.phase)
-        .onAppear { if vm.phase == .ringing { vm.begin() } }
+        .onAppear { if vm.phase == .ringing { vm.begin(language: parallelLanguage) } }
     }
 
     @ViewBuilder
