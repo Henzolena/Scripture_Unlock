@@ -1,7 +1,9 @@
 import SwiftUI
 import AVFoundation
 
-/// Full chapter reader — verse rows + floating audio player bar.
+/// Full chapter reader — verse rows. Audio is managed by the shared
+/// BibleAudioPlayer injected from BibleView via the environment so it
+/// keeps playing when the user navigates back to the book list.
 struct BibleReaderView: View {
 
     let book:     BibleBook
@@ -16,8 +18,8 @@ struct BibleReaderView: View {
     @State private var copiedVerse:     Int? = nil
     @State private var showCopiedBanner = false
 
-    /// One player instance per reader view — cleaned up on disappear.
-    @State private var audio = BibleAudioPlayer()
+    /// Shared player — owned by BibleView, injected via .environment(audioPlayer).
+    @Environment(BibleAudioPlayer.self) private var audio
 
     // MARK: - Body
 
@@ -29,7 +31,7 @@ struct BibleReaderView: View {
                 } else if let ch = bibleChapter, !ch.verses.isEmpty {
                     verseList(ch.verses)
                         .padding(20)
-                        // Extra bottom padding so last verse clears the audio bar
+                        // Extra bottom padding so last verse clears the persistent audio bar
                         .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
                 } else {
                     errorView
@@ -37,27 +39,21 @@ struct BibleReaderView: View {
             }
             .background(DesignSystem.warmCream)
 
-            // ── Audio player bar ─────────────────────────────────────────────
-            if audio.isLoading || audio.isAvailable {
-                AudioPlayerBar(audio: audio, book: book, chapter: chapter)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             // ── Copy confirmation banner ─────────────────────────────────────
             if showCopiedBanner {
                 copiedBanner
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // Float above the persistent audio bar when it's visible
                     .padding(.bottom, audio.isAvailable ? 116 : 16)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: audio.isAvailable)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: audio.isLoading)
         .animation(.easeInOut(duration: 0.25), value: showCopiedBanner)
         .background(DesignSystem.warmCream)
         .navigationTitle("\(book.englishName) \(chapter)")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            // Load verse text and audio in parallel
+            // Load verse text and audio in parallel.
+            // Audio will keep playing even after navigating away from this view.
             async let textLoad: () = loadChapter()
             async let audioLoad: () = audio.load(
                 language: language,
@@ -67,9 +63,7 @@ struct BibleReaderView: View {
             )
             _ = await (textLoad, audioLoad)
         }
-        .onDisappear {
-            audio.stop()
-        }
+        // No onDisappear stop — audio lives in the environment and persists
     }
 
     // MARK: - Verse list
@@ -183,8 +177,8 @@ struct BibleReaderView: View {
     // MARK: - Helpers
 
     private func loadChapter() async {
-        isLoading   = true
-        fetchFailed = false
+        isLoading    = true
+        fetchFailed  = false
         bibleChapter = await EthiopianBibleService.shared.chapter(
             book: book.abbreviation, chapter: chapter, language: language
         )
@@ -200,164 +194,6 @@ struct BibleReaderView: View {
             withAnimation { showCopiedBanner = false }
             copiedVerse = nil
         }
-    }
-}
-
-// MARK: - Audio player bar
-
-private struct AudioPlayerBar: View {
-
-    let audio:   BibleAudioPlayer
-    let book:    BibleBook
-    let chapter: Int
-
-    /// True while the user is actively dragging the scrubber.
-    @State private var isScrubbing   = false
-    @State private var scrubPosition: Double = 0
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Thin separator line
-            Rectangle()
-                .fill(DesignSystem.pastoralGold.opacity(0.20))
-                .frame(height: 1)
-
-            VStack(spacing: 10) {
-                // ── Top row: title + controls ────────────────────────────────
-                HStack(spacing: 0) {
-                    // Book / chapter label
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(book.englishName) \(chapter)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DesignSystem.ink)
-                            .lineLimit(1)
-                        if !audio.sourceName.isEmpty {
-                            Text(audio.sourceName)
-                                .font(.system(size: 10))
-                                .foregroundStyle(DesignSystem.slate400)
-                        }
-                    }
-
-                    Spacer()
-
-                    if audio.isLoading {
-                        // Buffering indicator
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.75)
-                                .tint(DesignSystem.pastoralGold)
-                            Text("Loading audio…")
-                                .font(.system(size: 12))
-                                .foregroundStyle(DesignSystem.slate400)
-                        }
-                    } else {
-                        // Playback controls
-                        HStack(spacing: 20) {
-                            // Skip back 15 s
-                            Button { audio.skip(by: -15) } label: {
-                                Image(systemName: "gobackward.15")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(DesignSystem.slate600)
-                            }
-
-                            // Play / Pause
-                            Button { audio.togglePlayPause() } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(DesignSystem.pastoralGold)
-                                        .frame(width: 44, height: 44)
-                                    Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill")
-                                        .font(.system(size: 18, weight: .bold))
-                                        .foregroundStyle(DesignSystem.deepBlue)
-                                        .offset(x: audio.isPlaying ? 0 : 1.5)
-                                }
-                            }
-
-                            // Skip forward 15 s
-                            Button { audio.skip(by: 15) } label: {
-                                Image(systemName: "goforward.15")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(DesignSystem.slate600)
-                            }
-                        }
-                    }
-                }
-
-                // ── Progress scrubber ────────────────────────────────────────
-                if audio.isAvailable {
-                    VStack(spacing: 4) {
-                        // Custom progress track + Slider
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                // Track background
-                                Capsule()
-                                    .fill(DesignSystem.slate400.opacity(0.25))
-                                    .frame(height: 3)
-
-                                // Fill
-                                Capsule()
-                                    .fill(DesignSystem.pastoralGold)
-                                    .frame(
-                                        width: geo.size.width * CGFloat(isScrubbing ? scrubPosition : audio.progress),
-                                        height: 3
-                                    )
-
-                                // Thumb
-                                Circle()
-                                    .fill(DesignSystem.pastoralGold)
-                                    .frame(width: 12, height: 12)
-                                    .shadow(color: DesignSystem.pastoralGold.opacity(0.4), radius: 4)
-                                    .offset(x: geo.size.width * CGFloat(isScrubbing ? scrubPosition : audio.progress) - 6)
-                            }
-                            .frame(height: 12)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        isScrubbing   = true
-                                        scrubPosition = max(0, min(value.location.x / geo.size.width, 1.0))
-                                    }
-                                    .onEnded { value in
-                                        let pos = max(0, min(value.location.x / geo.size.width, 1.0))
-                                        audio.seek(to: pos)
-                                        isScrubbing = false
-                                    }
-                            )
-                        }
-                        .frame(height: 12)
-
-                        // Time labels
-                        HStack {
-                            Text(formatTime(isScrubbing ? scrubPosition * audio.duration : audio.currentTime))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(DesignSystem.slate400)
-                            Spacer()
-                            Text(formatTime(audio.duration))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(DesignSystem.slate400)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-        }
-        .background(
-            DesignSystem.surface
-                .shadow(color: DesignSystem.shadow1, radius: 16, x: 0, y: -4)
-        )
-        .animation(.easeInOut(duration: 0.2), value: audio.isPlaying)
-        .animation(.easeInOut(duration: 0.2), value: audio.isAvailable)
-    }
-
-    // MARK: - Helpers
-
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds)
-        let mins  = total / 60
-        let secs  = total % 60
-        return "\(mins):\(String(format: "%02d", secs))"
     }
 }
 

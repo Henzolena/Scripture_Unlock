@@ -39,7 +39,9 @@ final class BibleAudioPlayer {
     /// Total duration in seconds (0 until AVPlayer resolves it).
     private(set) var duration:    Double = 0
     /// Human-readable audio source (e.g. "Internet Archive — English NIV Audio Bible").
-    private(set) var sourceName:  String = ""
+    private(set) var sourceName:   String = ""
+    /// Lock-screen / player bar title, e.g. "John 3". Set in load().
+    private(set) var displayTitle: String = ""
 
     /// 0.0 → 1.0 progress, safe to bind to a progress slider.
     var progress: Double {
@@ -89,10 +91,11 @@ final class BibleAudioPlayer {
 
         await MainActor.run {
             stop(keepKey: false)
-            isLoading   = true
-            isAvailable = false
-            sourceName  = ""
-            loadedKey   = key
+            isLoading    = true
+            isAvailable  = false
+            sourceName   = ""
+            displayTitle = ""
+            loadedKey    = key
         }
 
         // ── 1. Coverage lookup (cached — zero extra network cost) ────────────
@@ -108,9 +111,10 @@ final class BibleAudioPlayer {
             await MainActor.run { sourceName = src }
         }
 
-        // ── 2. Prepare Now Playing metadata ─────────────────────────────────
+        // ── 2. Prepare Now Playing + display metadata ────────────────────────
         nowPlayingTitle  = "\(bookName) \(chapter)"
         nowPlayingArtist = sourceName.isEmpty ? "Holy Bible" : sourceName
+        await MainActor.run { displayTitle = nowPlayingTitle }
 
         // ── 3. Build stream URL (API 307-redirects to the actual mp3) ────────
         let audioPath = "\(baseURL)/\(language)/audio/\(abbreviation)/\(chapter)"
@@ -160,11 +164,12 @@ final class BibleAudioPlayer {
     func stop(keepKey: Bool = false) {
         player?.pause()
         removeObservers()
-        player      = nil
-        isPlaying   = false
-        isAvailable = false
-        currentTime = 0
-        duration    = 0
+        player       = nil
+        isPlaying    = false
+        isAvailable  = false
+        currentTime  = 0
+        duration     = 0
+        displayTitle = ""
         if !keepKey { loadedKey = "" }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
