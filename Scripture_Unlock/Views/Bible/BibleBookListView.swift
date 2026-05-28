@@ -7,6 +7,9 @@ struct BibleBookListView: View {
     let language:  String
     let isLoading: Bool
 
+    /// Audio availability index fetched from /coverage/{lang} — abbrev → hasAudio
+    @State private var audioIndex: [String: Bool] = [:]
+
     private var oldTestament: [BibleBook] { books.filter { $0.testament == "OT" } }
     private var newTestament: [BibleBook] { books.filter { $0.testament == "NT" } }
 
@@ -27,6 +30,12 @@ struct BibleBookListView: View {
             BibleChapterGridView(book: book, language: language)
         }
         .background(DesignSystem.warmCream)
+        .task(id: language) {
+            // Fetch coverage for this language — cached after first load
+            if let cov = await EthiopianBibleService.shared.coverage(language: language) {
+                audioIndex = cov.bookIndex.mapValues { $0.audio }
+            }
+        }
     }
 
     // MARK: - Book list
@@ -41,7 +50,7 @@ struct BibleBookListView: View {
                         ForEach(oldTestament) { book in
                             // Value-based link — no gesture conflicts, reliable in ScrollView
                             NavigationLink(value: book) {
-                                BookRow(book: book)
+                                BookRow(book: book, hasAudio: audioIndex[book.abbreviation] ?? false)
                             }
                             .buttonStyle(BookRowButtonStyle())
                             .padding(.horizontal, 20)
@@ -56,7 +65,7 @@ struct BibleBookListView: View {
                     Section {
                         ForEach(newTestament) { book in
                             NavigationLink(value: book) {
-                                BookRow(book: book)
+                                BookRow(book: book, hasAudio: audioIndex[book.abbreviation] ?? false)
                             }
                             .buttonStyle(BookRowButtonStyle())
                             .padding(.horizontal, 20)
@@ -122,7 +131,8 @@ struct BibleBookListView: View {
 // MARK: - Book row
 
 private struct BookRow: View {
-    let book: BibleBook
+    let book:     BibleBook
+    let hasAudio: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -151,6 +161,13 @@ private struct BookRow: View {
             }
 
             Spacer()
+
+            // Audio available indicator
+            if hasAudio {
+                Image(systemName: "headphones")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DesignSystem.pastoralGold.opacity(0.7))
+            }
 
             // Chapter count
             HStack(spacing: 3) {

@@ -82,36 +82,24 @@ final class BibleAudioPlayer {
             loadedKey   = key
         }
 
-        // ── 1. Check availability via /info ─────────────────────────────────
-        let infoPath = "\(baseURL)/\(language)/audio/\(abbreviation)/\(chapter)/info"
-        guard let infoURL = URL(string: infoPath) else {
+        // ── 1. Check availability via cached coverage (zero network cost) ────
+        //    Coverage is fetched once per language and cached for the session.
+        //    This replaces the old /info HTTP call for every chapter opened.
+        let cov = await EthiopianBibleService.shared.coverage(language: language)
+        let bookCov = cov?.bookIndex[abbreviation.uppercased()]
+
+        guard bookCov?.audio == true else {
+            // No audio for this book in this language — stop silently.
             await MainActor.run { isLoading = false }
             return
         }
 
-        do {
-            let (data, response) = try await session.data(from: infoURL)
-            // API returns 404 when audio is unavailable — HTTP status is source of truth.
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                await MainActor.run { isLoading = false }
-                return
-            }
-            // Extra safety: also check the `available` flag in JSON body.
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                guard json["available"] as? Bool == true else {
-                    await MainActor.run { isLoading = false }
-                    return
-                }
-                if let source = json["source"] as? String {
-                    await MainActor.run { sourceName = source }
-                }
-            }
-        } catch {
-            await MainActor.run { isLoading = false }
-            return
+        // Source attribution comes from coverage too — no extra request needed.
+        if let src = cov?.audio.source, !src.isEmpty {
+            await MainActor.run { sourceName = src }
         }
 
-        // ── 2. Build streaming URL (API issues 307 → actual file) ────────────
+        // ── 2. Build streaming URL (API issues 307 → actual audio file) ──────
         let audioPath = "\(baseURL)/\(language)/audio/\(abbreviation)/\(chapter)"
         guard let audioURL = URL(string: audioPath) else {
             await MainActor.run { isLoading = false }

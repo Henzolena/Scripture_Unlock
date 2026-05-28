@@ -169,6 +169,32 @@ extension EthiopianBibleService {
         }
     }
 
+    // MARK: Coverage
+
+    /// Fetch per-book text + audio coverage for one language.
+    /// Cached for the session — call freely, only one network request per language.
+    func coverage(language: String) async -> LanguageCoverage? {
+        if let cached = coverageCache[language] { return cached }
+        guard let url = URL(string: "\(baseURL)/coverage/\(language)") else { return nil }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let result = try JSONDecoder().decode(LanguageCoverage.self, from: data)
+            coverageCache[language] = result
+            return result
+        } catch {
+            print("[EthiopianBibleService] coverage(\(language)) error: \(error)")
+            return nil
+        }
+    }
+
+    /// Quick boolean — does this book have audio in this language?
+    /// Uses cached coverage; safe to call before showing an audio player.
+    func bookHasAudio(language: String, abbreviation: String) async -> Bool {
+        let cov = await coverage(language: language)
+        return cov?.bookIndex[abbreviation.uppercased()]?.audio ?? false
+    }
+
     // MARK: Verse of the Day
 
     /// Deterministic verse of the day — changes daily.
@@ -184,19 +210,24 @@ extension EthiopianBibleService {
 
 // MARK: - Navigator caches (stored on the singleton)
 
-// Swift does not allow stored properties in extensions, so we use a private
-// wrapper held on the main class. Access them via the computed properties below.
-private var _bookCache:    [String: [BibleBook]]    = [:]
-private var _chapterCache: [String: BibleChapter]   = [:]
+// Swift does not allow stored properties in extensions, so we use private
+// module-level vars accessed via computed properties below.
+private var _bookCache:     [String: [BibleBook]]      = [:]
+private var _chapterCache:  [String: BibleChapter]     = [:]
+private var _coverageCache: [String: LanguageCoverage] = [:]
 
 extension EthiopianBibleService {
-    fileprivate var bookCache:    [String: [BibleBook]]  {
+    fileprivate var bookCache: [String: [BibleBook]] {
         get { _bookCache }
         set { _bookCache = newValue }
     }
     fileprivate var chapterCache: [String: BibleChapter] {
         get { _chapterCache }
         set { _chapterCache = newValue }
+    }
+    fileprivate var coverageCache: [String: LanguageCoverage] {
+        get { _coverageCache }
+        set { _coverageCache = newValue }
     }
 }
 
@@ -217,6 +248,48 @@ struct EthiopianVerse: Decodable {
         case verse
         case text
         case language
+    }
+}
+
+// MARK: - Coverage models
+
+/// Per-book entry from GET /api/v1/coverage/{lang}
+struct CoverageBook: Decodable {
+    let number:       Int
+    let abbreviation: String
+    let name:         String
+    let englishName:  String
+    let testament:    String
+    let chapters:     Int
+    let text:         Bool   // verses exist in DB
+    let audio:        Bool   // at least one chapter has audio
+
+    enum CodingKeys: String, CodingKey {
+        case number, abbreviation, name, testament, chapters, text, audio
+        case englishName = "english_name"
+    }
+}
+
+/// Top-level response from GET /api/v1/coverage/{lang}
+struct LanguageCoverage: Decodable {
+    let code:       String
+    let name:       String
+    let nativeName: String
+    let books:      [CoverageBook]
+    let audio:      AudioMeta
+
+    struct AudioMeta: Decodable {
+        let source: String
+    }
+
+    /// O(1) lookup by book abbreviation (e.g. "JHN", "PSA")
+    var bookIndex: [String: CoverageBook] {
+        Dictionary(uniqueKeysWithValues: books.map { ($0.abbreviation, $0) })
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case code, name, books, audio
+        case nativeName = "native_name"
     }
 }
 
