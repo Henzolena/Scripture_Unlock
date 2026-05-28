@@ -23,6 +23,26 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
 
     enum Kind: String, Codable { case mcq, fill }
 
+    // MARK: - Memberwise init (required once a custom Decodable init is added)
+
+    init(id: String, kind: Kind, book: String, packId: String, difficulty: Difficulty,
+         prompt: String?, options: [String], answerIndex: Int,
+         fillPre: String?, fillPost: String?,
+         verseRef: String, verseText: String) {
+        self.id          = id
+        self.kind        = kind
+        self.book        = book
+        self.packId      = packId
+        self.difficulty  = difficulty
+        self.prompt      = prompt
+        self.options     = options
+        self.answerIndex = answerIndex
+        self.fillPre     = fillPre
+        self.fillPost    = fillPost
+        self.verseRef    = verseRef
+        self.verseText   = verseText
+    }
+
     // MARK: - Custom decoder (handles null options/answerIndex from Gemini)
 
     enum CodingKeys: String, CodingKey {
