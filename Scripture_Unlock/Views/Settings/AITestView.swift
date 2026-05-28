@@ -205,10 +205,21 @@ struct AITestView: View {
                     ?? pack.name
         return """
         Generate exactly \(count) Bible trivia questions from \(pack.name) (\(books)).
-        Difficulty: \(difficulty.rawValue).
-        Mix fill-in-the-blank and MCQ types.
+        Difficulty: \(difficulty.rawValue). Mix fill-in-the-blank and MCQ types.
         Use real, accurate ESV verse text.
-        Return ONLY a JSON array. Each item: {"id":"BOOK.CH.VS-kind","kind":"fill" or "mcq","book":"Full name","packId":"\(pack.id)","difficulty":"\(difficulty.rawValue)","prompt":null or "question text","options":["a","b","c","d"],"answerIndex":0,"fillPre":null or "text","fillPost":null or "text","verseRef":"Book CH:VS","verseText":"full verse"}
+
+        CRITICAL — every question regardless of type MUST have:
+        - "options": an array of exactly 4 strings (NEVER null)
+        - "answerIndex": an integer 0-3 indicating the correct option (NEVER null)
+
+        For fill questions: options are [correct_word, distractor1, distractor2, distractor3].
+        answerIndex points to the correct word. fillPre + " " + options[answerIndex] + " " + fillPost = the verse.
+        prompt must be null for fill questions.
+
+        For mcq questions: fillPre and fillPost must be null.
+
+        Return ONLY a JSON array, no other text. Schema per item:
+        {"id":"BOOK.CH.VS-kind","kind":"fill" or "mcq","book":"Full book name","packId":"\(pack.id)","difficulty":"\(difficulty.rawValue)","prompt":null or "Question text?","options":["w1","w2","w3","w4"],"answerIndex":0,"fillPre":null or "text before blank","fillPost":null or "text after blank","verseRef":"Book CH:VS","verseText":"Complete verse text"}
         """
     }
 

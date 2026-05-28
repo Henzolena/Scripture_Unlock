@@ -189,18 +189,31 @@ final class QuestionGeneratorAgent {
         OUTPUT FORMAT
         Return ONLY a valid JSON array. No markdown, no explanations, no comments.
 
-        Each item in the array must match this exact schema:
+        CRITICAL — every question regardless of type MUST include:
+        • "options": exactly 4 non-empty strings (NEVER null or empty array)
+        • "answerIndex": integer 0–3 pointing to the correct option (NEVER null)
+
+        For FILL questions specifically:
+        • options[answerIndex] is the blanked word
+        • fillPre + " " + options[answerIndex] + " " + fillPost reconstructs the verse
+        • prompt must be null
+
+        For MCQ questions:
+        • fillPre and fillPost must be null
+        • prompt must be a non-null question string
+
+        Each item schema:
         {
           "id": "BOOK.CH.VS-kind",
           "kind": "fill" or "mcq",
           "book": "Full book name (e.g. Psalms, John)",
           "packId": "\(packId)",
           "difficulty": "\(difficulty.rawValue)",
-          "prompt": "Question text for MCQ — null for fill",
+          "prompt": null or "Question text?",
           "options": ["word1", "word2", "word3", "word4"],
-          "answerIndex": 0,
-          "fillPre": "Text before blank — null for MCQ",
-          "fillPost": "Text after blank — null for MCQ",
+          "answerIndex": 1,
+          "fillPre": "Text before blank" or null,
+          "fillPost": "text after blank" or null,
           "verseRef": "Book Chapter:Verse",
           "verseText": "Complete ESV verse text"
         }

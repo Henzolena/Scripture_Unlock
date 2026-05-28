@@ -23,6 +23,32 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
 
     enum Kind: String, Codable { case mcq, fill }
 
+    // MARK: - Custom decoder (handles null options/answerIndex from Gemini)
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, book, packId, difficulty
+        case prompt, options, answerIndex
+        case fillPre, fillPost
+        case verseRef, verseText
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decode(String.self,     forKey: .id)
+        kind        = try c.decode(Kind.self,        forKey: .kind)
+        book        = try c.decode(String.self,     forKey: .book)
+        packId      = try c.decode(String.self,     forKey: .packId)
+        difficulty  = try c.decode(Difficulty.self, forKey: .difficulty)
+        prompt      = try c.decodeIfPresent(String.self, forKey: .prompt)
+        // Gemini sometimes returns null for these on fill questions — default safely
+        options     = (try? c.decode([String].self, forKey: .options)) ?? []
+        answerIndex = (try? c.decode(Int.self,      forKey: .answerIndex)) ?? 0
+        fillPre     = try c.decodeIfPresent(String.self, forKey: .fillPre)
+        fillPost    = try c.decodeIfPresent(String.self, forKey: .fillPost)
+        verseRef    = try c.decode(String.self,     forKey: .verseRef)
+        verseText   = try c.decode(String.self,     forKey: .verseText)
+    }
+
     /// Safe accessor — never crashes even if Gemini returned a bad answerIndex.
     var correctAnswer: String {
         guard !options.isEmpty else { return "" }
