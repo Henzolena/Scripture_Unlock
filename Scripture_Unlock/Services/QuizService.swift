@@ -13,8 +13,8 @@ struct QuizQuestion: Decodable, Identifiable {
     let book:          String
     let bookName:      String
     let chapter:       Int
-    let verseStart:    Int
-    let verseEnd:      Int
+    let verseStart:    Int?     // nil for whole-chapter questions
+    let verseEnd:      Int?     // nil for whole-chapter questions
     let verseRef:      String
     let language:      String
     let question:      String
@@ -115,7 +115,11 @@ final class QuizService {
         }
         // Fallback: chapter-level, filter client-side to verses near this one
         if let qs = await _fetch(path: "\(baseURL)/\(lang)/books/\(book)/\(chapter)?page_size=50") {
-            return qs.filter { $0.verseStart <= verse && $0.verseEnd >= verse }
+            let nearby = qs.filter {
+                guard let vs = $0.verseStart, let ve = $0.verseEnd else { return true }
+                return vs <= verse && ve >= verse
+            }
+            return nearby.isEmpty ? qs : nearby   // if none match exactly, return all chapter Qs
         }
         return []
     }
