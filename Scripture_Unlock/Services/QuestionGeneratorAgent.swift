@@ -59,7 +59,7 @@ final class QuestionGeneratorAgent {
         generating.insert(key)
         Task {
             await generateAndCache(packId: packId, difficulty: difficulty)
-            await MainActor.run { generating.remove(key) }
+            _ = await MainActor.run { generating.remove(key) }
         }
     }
 

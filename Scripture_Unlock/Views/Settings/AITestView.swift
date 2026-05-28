@@ -267,7 +267,7 @@ private struct ResultRow: View {
                         .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                     Text(result.question.verseText)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(result.passed ? .primary : .red)
+                        .foregroundStyle(result.passed ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.red))
 
                     if let api = result.apiText {
                         Text("API verse:")
