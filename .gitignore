@@ -17,3 +17,7 @@ DerivedData/
 
 # Swift Package Manager
 .build/
+
+# Gemini / other secret scratch files
+gemeni-key-secret.md
+*.key.md

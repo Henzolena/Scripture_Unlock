@@ -15,9 +15,21 @@ struct Scripture_UnlockApp: App {
     @State private var triviaService = TriviaService.shared
 
     init() {
-        // Touch the shared instance now so UNUserNotificationCenter.delegate
-        // is registered before the system delivers any pending responses.
+        // Touch AlarmService early so UNUserNotificationCenter.delegate is
+        // registered before the system delivers any pending responses.
         _ = AlarmService.shared
+
+        // Warm the AI question cache in the background so questions are ready
+        // by the time the first alarm fires.
+        Task {
+            for pack in VersePack.all {
+                for difficulty in [Difficulty.gentle, .regular, .scholar] {
+                    QuestionGeneratorAgent.shared.prefetchIfNeeded(
+                        forPack: pack.id, difficulty: difficulty
+                    )
+                }
+            }
+        }
     }
 
     var body: some Scene {
