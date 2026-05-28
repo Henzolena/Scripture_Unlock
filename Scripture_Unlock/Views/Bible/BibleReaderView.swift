@@ -17,6 +17,7 @@ struct BibleReaderView: View {
     @State private var fetchFailed:     Bool = false
     @State private var copiedVerse:     Int? = nil
     @State private var showCopiedBanner = false
+    @State private var practiceTarget:  PracticeTarget? = nil
 
     /// Shared player — owned by BibleView, injected via .environment(audioPlayer).
     @Environment(BibleAudioPlayer.self) private var audio
@@ -48,6 +49,12 @@ struct BibleReaderView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: showCopiedBanner)
+        .sheet(item: $practiceTarget) { target in
+            VerseQuizSheet(target: target)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
         .background(DesignSystem.warmCream)
         .navigationTitle("\(book.englishName) \(chapter)")
         .navigationBarTitleDisplayMode(.inline)
@@ -72,9 +79,18 @@ struct BibleReaderView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             chapterHeader
             ForEach(verses, id: \.verse) { verse in
-                VerseRow(verse: verse, isCopied: copiedVerse == verse.verse) {
-                    copyVerse(verse)
-                }
+                VerseRow(
+                    verse:     verse,
+                    isCopied:  copiedVerse == verse.verse,
+                    onCopy:    { copyVerse(verse) },
+                    onPractice: {
+                        practiceTarget = PracticeTarget(
+                            verse:    verse,
+                            book:     book,
+                            language: language
+                        )
+                    }
+                )
             }
         }
     }
@@ -202,23 +218,41 @@ struct BibleReaderView: View {
 private struct VerseRow: View {
     let verse:       EthiopianVerse
     let isCopied:    Bool
-    let onLongPress: () -> Void
+    let onCopy:      () -> Void
+    let onPractice:  () -> Void
+
+    @State private var showActions = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(verse.verse)")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(DesignSystem.pastoralGold)
-                .monospacedDigit()
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 32, alignment: .trailing)
-                .padding(.top, 5)
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                // Verse number
+                Text("\(verse.verse)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DesignSystem.pastoralGold)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: 32, alignment: .trailing)
+                    .padding(.top, 5)
 
-            Text(verse.text)
-                .font(DesignSystem.serif(19))
-                .foregroundStyle(DesignSystem.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // Verse text
+                Text(verse.text)
+                    .font(DesignSystem.serif(19))
+                    .foregroundStyle(DesignSystem.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Practice button — always visible, subtle gold brain icon
+                Button(action: onPractice) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(DesignSystem.pastoralGold.opacity(0.65))
+                        .frame(width: 28, height: 28)
+                        .background(DesignSystem.pastoralGold.opacity(0.09))
+                        .clipShape(Circle())
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
@@ -227,7 +261,7 @@ private struct VerseRow: View {
                 .fill(isCopied ? DesignSystem.pastoralGold.opacity(0.08) : Color.clear)
         )
         .contentShape(Rectangle())
-        .onLongPressGesture(minimumDuration: 0.4) { onLongPress() }
+        .onLongPressGesture(minimumDuration: 0.4) { onCopy() }
         .animation(.easeInOut(duration: 0.2), value: isCopied)
     }
 }
