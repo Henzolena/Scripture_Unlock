@@ -1,7 +1,7 @@
 import SwiftUI
+import AVFoundation
 
-/// Full chapter reader — renders every verse with a serif body and gold verse numbers.
-/// Long-press any verse to copy its text to the clipboard.
+/// Full chapter reader — verse rows + floating audio player bar.
 struct BibleReaderView: View {
 
     let book:     BibleBook
@@ -10,11 +10,14 @@ struct BibleReaderView: View {
 
     // MARK: - State
 
-    @State private var bibleChapter:  BibleChapter? = nil
-    @State private var isLoading:     Bool = true
-    @State private var fetchFailed:   Bool = false
-    @State private var copiedVerse:   Int? = nil
+    @State private var bibleChapter:    BibleChapter? = nil
+    @State private var isLoading:       Bool = true
+    @State private var fetchFailed:     Bool = false
+    @State private var copiedVerse:     Int? = nil
     @State private var showCopiedBanner = false
+
+    /// One player instance per reader view — cleaned up on disappear.
+    @State private var audio = BibleAudioPlayer()
 
     // MARK: - Body
 
@@ -22,31 +25,49 @@ struct BibleReaderView: View {
         ZStack(alignment: .bottom) {
             ScrollView {
                 if isLoading {
-                    placeholderRows
-                        .padding(20)
+                    placeholderRows.padding(20)
                 } else if let ch = bibleChapter, !ch.verses.isEmpty {
                     verseList(ch.verses)
                         .padding(20)
-                        .padding(.bottom, 60)
+                        // Extra bottom padding so last verse clears the audio bar
+                        .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
                 } else {
                     errorView
                 }
             }
             .background(DesignSystem.warmCream)
 
-            // Copied confirmation banner
+            // ── Audio player bar ─────────────────────────────────────────────
+            if audio.isLoading || audio.isAvailable {
+                AudioPlayerBar(audio: audio, book: book, chapter: chapter)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // ── Copy confirmation banner ─────────────────────────────────────
             if showCopiedBanner {
                 copiedBanner
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 16)
+                    .padding(.bottom, audio.isAvailable ? 116 : 16)
             }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: audio.isAvailable)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: audio.isLoading)
         .animation(.easeInOut(duration: 0.25), value: showCopiedBanner)
         .background(DesignSystem.warmCream)
         .navigationTitle("\(book.englishName) \(chapter)")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await loadChapter()
+            // Load verse text and audio in parallel
+            async let textLoad: () = loadChapter()
+            async let audioLoad: () = audio.load(
+                language: language,
+                book: book.abbreviation,
+                chapter: chapter
+            )
+            _ = await (textLoad, audioLoad)
+        }
+        .onDisappear {
+            audio.stop()
         }
     }
 
@@ -54,14 +75,9 @@ struct BibleReaderView: View {
 
     private func verseList(_ verses: [EthiopianVerse]) -> some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            // Chapter drop cap header
             chapterHeader
-
             ForEach(verses, id: \.verse) { verse in
-                VerseRow(
-                    verse: verse,
-                    isCopied: copiedVerse == verse.verse
-                ) {
+                VerseRow(verse: verse, isCopied: copiedVerse == verse.verse) {
                     copyVerse(verse)
                 }
             }
@@ -73,8 +89,6 @@ struct BibleReaderView: View {
     private var chapterHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 16) {
-                // Large chapter number — fixedSize so it never truncates to "…"
-                // regardless of how many digits the chapter number has
                 Text("\(chapter)")
                     .font(.system(size: 64, weight: .black, design: .serif))
                     .foregroundStyle(DesignSystem.pastoralGold)
@@ -92,10 +106,8 @@ struct BibleReaderView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-
                 Spacer()
             }
-
             Rectangle()
                 .fill(DesignSystem.pastoralGold.opacity(0.35))
                 .frame(height: 1)
@@ -104,15 +116,13 @@ struct BibleReaderView: View {
         .padding(.bottom, 20)
     }
 
-    // MARK: - Placeholder (loading skeleton)
+    // MARK: - Placeholder skeleton
 
     private var placeholderRows: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Fake drop cap header
             RoundedRectangle(cornerRadius: 8)
                 .fill(DesignSystem.slate400.opacity(0.15))
                 .frame(height: 72)
-
             ForEach(0..<8, id: \.self) { i in
                 HStack(alignment: .top, spacing: 10) {
                     RoundedRectangle(cornerRadius: 4)
@@ -172,26 +182,181 @@ struct BibleReaderView: View {
     // MARK: - Helpers
 
     private func loadChapter() async {
-        isLoading = true
+        isLoading   = true
         fetchFailed = false
         bibleChapter = await EthiopianBibleService.shared.chapter(
-            book: book.abbreviation,
-            chapter: chapter,
-            language: language
+            book: book.abbreviation, chapter: chapter, language: language
         )
         if bibleChapter == nil { fetchFailed = true }
         isLoading = false
     }
 
     private func copyVerse(_ verse: EthiopianVerse) {
-        let text = "\(book.englishName) \(chapter):\(verse.verse) — \(verse.text)"
-        UIPasteboard.general.string = text
+        UIPasteboard.general.string = "\(book.englishName) \(chapter):\(verse.verse) — \(verse.text)"
         copiedVerse = verse.verse
         withAnimation { showCopiedBanner = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation { showCopiedBanner = false }
             copiedVerse = nil
         }
+    }
+}
+
+// MARK: - Audio player bar
+
+private struct AudioPlayerBar: View {
+
+    let audio:   BibleAudioPlayer
+    let book:    BibleBook
+    let chapter: Int
+
+    /// True while the user is actively dragging the scrubber.
+    @State private var isScrubbing   = false
+    @State private var scrubPosition: Double = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Thin separator line
+            Rectangle()
+                .fill(DesignSystem.pastoralGold.opacity(0.20))
+                .frame(height: 1)
+
+            VStack(spacing: 10) {
+                // ── Top row: title + controls ────────────────────────────────
+                HStack(spacing: 0) {
+                    // Book / chapter label
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(book.englishName) \(chapter)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(DesignSystem.ink)
+                            .lineLimit(1)
+                        if !audio.sourceName.isEmpty {
+                            Text(audio.sourceName)
+                                .font(.system(size: 10))
+                                .foregroundStyle(DesignSystem.slate400)
+                        }
+                    }
+
+                    Spacer()
+
+                    if audio.isLoading {
+                        // Buffering indicator
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.75)
+                                .tint(DesignSystem.pastoralGold)
+                            Text("Loading audio…")
+                                .font(.system(size: 12))
+                                .foregroundStyle(DesignSystem.slate400)
+                        }
+                    } else {
+                        // Playback controls
+                        HStack(spacing: 20) {
+                            // Skip back 15 s
+                            Button { audio.skip(by: -15) } label: {
+                                Image(systemName: "gobackward.15")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(DesignSystem.slate600)
+                            }
+
+                            // Play / Pause
+                            Button { audio.togglePlayPause() } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(DesignSystem.pastoralGold)
+                                        .frame(width: 44, height: 44)
+                                    Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundStyle(DesignSystem.deepBlue)
+                                        .offset(x: audio.isPlaying ? 0 : 1.5)
+                                }
+                            }
+
+                            // Skip forward 15 s
+                            Button { audio.skip(by: 15) } label: {
+                                Image(systemName: "goforward.15")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(DesignSystem.slate600)
+                            }
+                        }
+                    }
+                }
+
+                // ── Progress scrubber ────────────────────────────────────────
+                if audio.isAvailable {
+                    VStack(spacing: 4) {
+                        // Custom progress track + Slider
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                // Track background
+                                Capsule()
+                                    .fill(DesignSystem.slate400.opacity(0.25))
+                                    .frame(height: 3)
+
+                                // Fill
+                                Capsule()
+                                    .fill(DesignSystem.pastoralGold)
+                                    .frame(
+                                        width: geo.size.width * CGFloat(isScrubbing ? scrubPosition : audio.progress),
+                                        height: 3
+                                    )
+
+                                // Thumb
+                                Circle()
+                                    .fill(DesignSystem.pastoralGold)
+                                    .frame(width: 12, height: 12)
+                                    .shadow(color: DesignSystem.pastoralGold.opacity(0.4), radius: 4)
+                                    .offset(x: geo.size.width * CGFloat(isScrubbing ? scrubPosition : audio.progress) - 6)
+                            }
+                            .frame(height: 12)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        isScrubbing   = true
+                                        scrubPosition = max(0, min(value.location.x / geo.size.width, 1.0))
+                                    }
+                                    .onEnded { value in
+                                        let pos = max(0, min(value.location.x / geo.size.width, 1.0))
+                                        audio.seek(to: pos)
+                                        isScrubbing = false
+                                    }
+                            )
+                        }
+                        .frame(height: 12)
+
+                        // Time labels
+                        HStack {
+                            Text(formatTime(isScrubbing ? scrubPosition * audio.duration : audio.currentTime))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(DesignSystem.slate400)
+                            Spacer()
+                            Text(formatTime(audio.duration))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(DesignSystem.slate400)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .background(
+            DesignSystem.surface
+                .shadow(color: DesignSystem.shadow1, radius: 16, x: 0, y: -4)
+        )
+        .animation(.easeInOut(duration: 0.2), value: audio.isPlaying)
+        .animation(.easeInOut(duration: 0.2), value: audio.isAvailable)
+    }
+
+    // MARK: - Helpers
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds)
+        let mins  = total / 60
+        let secs  = total % 60
+        return "\(mins):\(String(format: "%02d", secs))"
     }
 }
 
@@ -204,9 +369,6 @@ private struct VerseRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            // Verse number — fixedSize(horizontal:) tells SwiftUI to always
-            // render at natural width, preventing LazyVStack's lazy layout pass
-            // from compressing this column to zero and showing "…"
             Text("\(verse.verse)")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(DesignSystem.pastoralGold)
@@ -215,7 +377,6 @@ private struct VerseRow: View {
                 .frame(minWidth: 32, alignment: .trailing)
                 .padding(.top, 5)
 
-            // Verse text
             Text(verse.text)
                 .font(DesignSystem.serif(19))
                 .foregroundStyle(DesignSystem.ink)
@@ -226,14 +387,10 @@ private struct VerseRow: View {
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isCopied
-                      ? DesignSystem.pastoralGold.opacity(0.08)
-                      : Color.clear)
+                .fill(isCopied ? DesignSystem.pastoralGold.opacity(0.08) : Color.clear)
         )
         .contentShape(Rectangle())
-        .onLongPressGesture(minimumDuration: 0.4) {
-            onLongPress()
-        }
+        .onLongPressGesture(minimumDuration: 0.4) { onLongPress() }
         .animation(.easeInOut(duration: 0.2), value: isCopied)
     }
 }
