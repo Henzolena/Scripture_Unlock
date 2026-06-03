@@ -9,12 +9,20 @@ import UIKit
 //
 //  Aggressiveness layer (mirrors what Alarmy/Step Out of Bed do):
 //   1. .timeSensitive interruption level — cuts through most Focus modes
-//   2. AVAudioSession(.playback) + synthesised tone loop — alarm keeps
+//   2. Background audio keep-alive — when app goes to background, a silent
+//      PCM buffer starts looping under UIBackgroundModes:audio so the app
+//      stays running and its Timer fires at the exact alarm moment.
+//   3. AVAudioSession(.playback) + synthesised tone loop — alarm keeps
 //      ringing even when screen is locked or app is backgrounded
-//   3. isIdleTimerDisabled = true — screen stays on while alarm is active
-//   4. Re-engagement notification — fires 4 seconds after the user backgrounds
+//   4. In-process alarm timer — fires at the scheduled time and:
+//        a) Switches from silent keep-alive → full alarm audio
+//        b) Sets activeAlarm (SwiftUI fullScreenCover shows on next foreground)
+//        c) Posts an immediate UNNotification so a banner / lock-screen
+//           alert appears even if the user is in another app
+//   5. isIdleTimerDisabled = true — screen stays on while alarm is active
+//   6. Re-engagement notification — fires 4 seconds after the user backgrounds
 //      the app mid-alarm, pulling them back to the trivia screen
-//   5. RootView adds interactiveDismissDisabled(true) so the cover cannot
+//   7. RootView adds interactiveDismissDisabled(true) so the cover cannot
 //      be swiped away
 //
 //  Hard limits without AlarmKit:
@@ -35,10 +43,16 @@ final class AlarmService: NSObject {
 
     private var activeNotificationId: String?
 
-    // Audio engine for in-app alarm tone
-    private var audioEngine   = AVAudioEngine()
-    private var playerNode    = AVAudioPlayerNode()
-    private var isAudioActive = false
+    // MARK: - Audio engine (for keep-alive) + AVAudioPlayer (for alarm tone)
+    private var audioEngine      = AVAudioEngine()
+    private var playerNode       = AVAudioPlayerNode()
+    private var alarmPlayer: AVAudioPlayer?   // plays the selected .caf tone
+    private var isAlarmAudioActive  = false   // loud alarm is playing
+    private var isKeepAliveActive   = false   // silent keep-alive is playing
+
+    // MARK: - Background monitoring
+    private var backgroundTimer: Timer?
+    private var monitoredAlarm: Alarm?   // the alarm the timer is armed for
 
     private override init() {
         super.init()
@@ -63,63 +77,179 @@ final class AlarmService: NSObject {
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
     }
 
-    /// Starts the in-app alarm tone and loops it until stopAlarmAudio() is called.
+    /// Starts the loud alarm tone using the alarm's selected .caf sound file.
+    /// Falls back to a synthesised PCM beep if the file is missing.
+    /// If silent keep-alive is running it is replaced first.
     func startAlarmAudio() {
-        guard !isAudioActive else { return }
+        if isKeepAliveActive { stopKeepAlive() }
+        guard !isAlarmAudioActive else { return }
         do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .default,
-                options: [.mixWithOthers]
-            )
+            // Interrupt any other audio so the alarm cuts through
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
             try AVAudioSession.sharedInstance().setActive(true)
 
-            // Build one buffer containing the full beep pattern:
-            // 0.35 s high (880 Hz) + 0.25 s low (660 Hz) + 0.65 s silence
-            // Then schedule it with .loops — AVAudioPlayerNode repeats it
-            // indefinitely without any completion-handler chaining.
-            let sampleRate: Double = 44_100
-            let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+            // Determine which tone file to play
+            let toneId   = activeAlarm?.toneIdentifier ?? AlarmTone.all[0].id
+            let tone     = AlarmTone.find(id: toneId)
+            let cafName  = tone.filename + ".caf"
 
-            let highFrames    = Int(sampleRate * 0.35)
-            let lowFrames     = Int(sampleRate * 0.25)
-            let silenceFrames = Int(sampleRate * 0.65)
-            let totalFrames   = highFrames + lowFrames + silenceFrames
-
-            let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                          frameCapacity: AVAudioFrameCount(totalFrames))!
-            buffer.frameLength = AVAudioFrameCount(totalFrames)
-            let data = buffer.floatChannelData![0]
-
-            let amplitude: Float = 0.65
-            for i in 0..<highFrames {
-                data[i] = amplitude * Float(sin(2 * .pi * 880 * Double(i) / sampleRate))
+            if let url = Bundle.main.url(forResource: tone.filename, withExtension: "caf") {
+                // Play the real .caf file, looping indefinitely
+                alarmPlayer = try AVAudioPlayer(contentsOf: url)
+                alarmPlayer?.numberOfLoops = -1   // infinite loop
+                alarmPlayer?.volume = 1.0
+                alarmPlayer?.play()
+            } else {
+                // Fallback: synthesised PCM beep via AVAudioEngine
+                print("[AlarmService] Missing \(cafName) — using synthesised fallback")
+                try startSynthesisedFallback()
             }
-            for i in 0..<lowFrames {
-                data[highFrames + i] = amplitude * Float(sin(2 * .pi * 660 * Double(i) / sampleRate))
-            }
-            // silence frames are zero-initialised by AVAudioPCMBuffer
-
-            if !audioEngine.isRunning { try audioEngine.start() }
-
-            // .loops makes the node repeat this buffer forever
-            playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
-            playerNode.play()
-            isAudioActive = true
+            isAlarmAudioActive = true
         } catch {
-            // Graceful degradation — rest of alarm (visual + notifications) still works
+            print("[AlarmService] startAlarmAudio error: \(error)")
         }
-
         UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    /// Synthesised PCM fallback used only when a .caf file is unexpectedly missing.
+    private func startSynthesisedFallback() throws {
+        let sampleRate: Double = 44_100
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let highFrames    = Int(sampleRate * 0.35)
+        let lowFrames     = Int(sampleRate * 0.25)
+        let silenceFrames = Int(sampleRate * 0.65)
+        let totalFrames   = highFrames + lowFrames + silenceFrames
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalFrames))!
+        buffer.frameLength = AVAudioFrameCount(totalFrames)
+        let data = buffer.floatChannelData![0]
+        let amp: Float = 0.85
+        for i in 0..<highFrames {
+            data[i] = amp * Float(sin(2 * .pi * 880 * Double(i) / sampleRate))
+        }
+        for i in 0..<lowFrames {
+            data[highFrames + i] = amp * Float(sin(2 * .pi * 660 * Double(i) / sampleRate))
+        }
+        if !audioEngine.isRunning { try audioEngine.start() }
+        playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
+        playerNode.play()
     }
 
     /// Stops the alarm tone and re-enables screen sleep.
     func stopAlarmAudio() {
+        alarmPlayer?.stop()
+        alarmPlayer = nil
         playerNode.stop()
         if audioEngine.isRunning { audioEngine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        isAudioActive = false
+        isAlarmAudioActive = false
         UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    // MARK: - Silent keep-alive (holds UIBackgroundModes:audio session open)
+
+    /// Plays an inaudible buffer to keep the app running in background via
+    /// UIBackgroundModes:audio so the background alarm timer can fire on time.
+    private func startKeepAlive() {
+        guard !isAlarmAudioActive, !isKeepAliveActive else { return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            let sampleRate: Double = 44_100
+            let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+            // 5-second silent buffer, looped — inaudible but keeps session alive
+            let frames  = Int(sampleRate * 5)
+            let buffer  = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
+            buffer.frameLength = AVAudioFrameCount(frames)
+            // All samples default to 0.0 (silence)
+            if !audioEngine.isRunning { try audioEngine.start() }
+            playerNode.scheduleBuffer(buffer, at: nil, options: .loops, completionHandler: nil)
+            playerNode.play()
+            isKeepAliveActive = true
+            print("[AlarmService] Silent keep-alive started")
+        } catch {
+            print("[AlarmService] startKeepAlive error: \(error)")
+        }
+    }
+
+    private func stopKeepAlive() {
+        guard isKeepAliveActive else { return }
+        playerNode.stop()
+        // Don't stop the engine here — startAlarmAudio may restart it immediately
+        isKeepAliveActive = false
+        print("[AlarmService] Silent keep-alive stopped")
+    }
+
+    // MARK: - Background monitoring
+
+    /// Call this when the app goes to background.
+    /// Starts a silent audio keep-alive + schedules an in-process Timer so the
+    /// alarm fires even if the user is in another app or the phone is locked.
+    func startBackgroundMonitoring(alarms: [Alarm]) {
+        stopBackgroundMonitoring()          // cancel any previous timer
+        guard activeAlarm == nil else { return }  // already ringing — no-op
+
+        // Find the soonest upcoming alarm
+        let upcoming = alarms
+            .compactMap { alarm -> (alarm: Alarm, date: Date)? in
+                guard let d = alarm.nextActualFireDate else { return nil }
+                return (alarm, d)
+            }
+            .sorted { $0.date < $1.date }
+            .first
+        guard let next = upcoming else {
+            print("[AlarmService] No upcoming alarms — skipping background monitoring")
+            return
+        }
+
+        let delay = next.date.timeIntervalSinceNow
+        guard delay > 0 else { return }
+
+        monitoredAlarm = next.alarm
+        startKeepAlive()
+
+        // Timer fires at alarm time and triggers everything
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            self?.fireFromBackground(next.alarm)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        backgroundTimer = timer
+
+        print("[AlarmService] Background monitoring armed: '\(next.alarm.label)' in \(Int(delay))s")
+    }
+
+    /// Call this when the app returns to the foreground.
+    func stopBackgroundMonitoring() {
+        backgroundTimer?.invalidate()
+        backgroundTimer   = nil
+        monitoredAlarm    = nil
+        stopKeepAlive()
+    }
+
+    /// Fires the alarm from inside a background timer callback.
+    private func fireFromBackground(_ alarm: Alarm) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.monitoredAlarm = nil
+            self.activeAlarm    = alarm
+            self.startAlarmAudio()
+
+            // Post an immediate notification so a banner / lock-screen alert
+            // appears even if the user is looking at a different app.
+            let content = UNMutableNotificationContent()
+            content.title             = "⏰ \(alarm.label)"
+            content.body              = "Answer \(alarm.effectiveQuestionCount) Bible verses to silence the alarm."
+            content.sound             = UNNotificationSound(named: UNNotificationSoundName(rawValue: "alarm_ringtone.caf"))
+            if content.sound == nil { content.sound = .default }
+            content.interruptionLevel = .timeSensitive
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: "alarm-fire-\(alarm.id.uuidString)",
+                content:    content,
+                trigger:    trigger
+            )
+            try? await UNUserNotificationCenter.current().add(request)
+            print("[AlarmService] Fired from background: \(alarm.label)")
+        }
     }
 
     // MARK: - Re-engagement (fires when user backs out of alarm screen)
@@ -202,6 +332,7 @@ final class AlarmService: NSObject {
 
     /// Called by TriviaViewModel after all correct answers — fully silences the alarm.
     func dismissAlarm(_ alarm: Alarm) async {
+        stopBackgroundMonitoring()
         stopAlarmAudio()
         cancelReengagementNotification()
 
@@ -238,8 +369,10 @@ final class AlarmService: NSObject {
         let content                = UNMutableNotificationContent()
         content.title              = alarm.label
         content.body               = "Answer \(alarm.effectiveQuestionCount) verses to silence."
-        content.sound              = .default
         content.interruptionLevel  = .timeSensitive
+        // Use the alarm's selected tone (.caf file in the app bundle)
+        let tone = AlarmTone.find(id: alarm.toneIdentifier)
+        content.sound = tone.notificationSound
         content.userInfo = [
             "alarmId":        alarm.id.uuidString,
             "notificationId": notificationId,
@@ -251,6 +384,7 @@ final class AlarmService: NSObject {
             "packId":         alarm.packId,
             "difficultyRaw":  alarm.difficultyRaw,
             "translationRaw": alarm.translationRaw,
+            "toneIdentifier": alarm.toneIdentifier,
         ]
         return content
     }
@@ -262,14 +396,15 @@ final class AlarmService: NSObject {
             let label = userInfo["alarmLabel"] as? String
         else { return nil }
 
-        let alarm            = Alarm(label: label, hour: userInfo["hour"] as? Int ?? 6,
-                                     minute: userInfo["minute"] as? Int ?? 0)
-        alarm.id             = id
-        alarm.isAM           = (userInfo["isAM"] as? Int ?? 1) == 1
-        alarm.questionCount  = userInfo["questionCount"]  as? Int    ?? 3
-        alarm.packId         = userInfo["packId"]         as? String ?? ""
-        alarm.difficultyRaw  = userInfo["difficultyRaw"]  as? String ?? Difficulty.regular.rawValue
-        alarm.translationRaw = userInfo["translationRaw"] as? String ?? Translation.esv.rawValue
+        let alarm              = Alarm(label: label, hour: userInfo["hour"] as? Int ?? 6,
+                                       minute: userInfo["minute"] as? Int ?? 0)
+        alarm.id               = id
+        alarm.isAM             = (userInfo["isAM"] as? Int ?? 1) == 1
+        alarm.questionCount    = userInfo["questionCount"]  as? Int    ?? 3
+        alarm.packId           = userInfo["packId"]         as? String ?? ""
+        alarm.difficultyRaw    = userInfo["difficultyRaw"]  as? String ?? Difficulty.regular.rawValue
+        alarm.translationRaw   = userInfo["translationRaw"] as? String ?? Translation.esv.rawValue
+        alarm.toneIdentifier   = userInfo["toneIdentifier"] as? String ?? AlarmTone.all[0].id
         return alarm
     }
 }
@@ -284,14 +419,24 @@ extension AlarmService: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let info = notification.request.content.userInfo
-        if let alarm = reconstruct(from: info) {
-            let nid = info["notificationId"] as? String ?? notification.request.identifier
-            Task { await MainActor.run {
-                self.activeNotificationId = nid
-                self.activeAlarm = alarm
-                self.startAlarmAudio()
-            }}
+
+        // Alarm-fire notification triggered by fireFromBackground — app is already showing
+        // the full-screen cover, so suppress the banner and just play the badge.
+        if notification.request.identifier.hasPrefix("alarm-fire-") {
+            completionHandler([.badge])
+            return
         }
+
+        // Re-engagement or scheduled system notification: set activeAlarm if not already ringing
+        if activeAlarm == nil, let alarm = reconstruct(from: info) {
+            let nid = info["notificationId"] as? String ?? notification.request.identifier
+            Task { @MainActor in
+                self.activeNotificationId = nid
+                self.activeAlarm          = alarm
+                self.startAlarmAudio()
+            }
+        }
+        // Suppress the banner — the full-screen cover handles the visual alarm
         completionHandler([.sound, .badge])
     }
 
@@ -301,13 +446,24 @@ extension AlarmService: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        if let alarm = reconstruct(from: info) {
-            let nid = info["notificationId"] as? String ?? response.notification.request.identifier
-            Task { await MainActor.run {
-                self.activeNotificationId = nid
-                self.activeAlarm = alarm
-                self.startAlarmAudio()
-            }}
+
+        // User tapped a notification (from lock screen or banner) — bring up the alarm screen
+        if activeAlarm == nil {
+            // For alarm-fire notifications there's no userInfo alarm data — use monitoredAlarm
+            if response.notification.request.identifier.hasPrefix("alarm-fire-"),
+               let alarm = monitoredAlarm ?? activeAlarm {
+                Task { @MainActor in
+                    self.activeAlarm = alarm
+                    self.startAlarmAudio()
+                }
+            } else if let alarm = reconstruct(from: info) {
+                let nid = info["notificationId"] as? String ?? response.notification.request.identifier
+                Task { @MainActor in
+                    self.activeNotificationId = nid
+                    self.activeAlarm          = alarm
+                    self.startAlarmAudio()
+                }
+            }
         }
         completionHandler()
     }

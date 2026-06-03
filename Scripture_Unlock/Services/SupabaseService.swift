@@ -45,9 +45,11 @@ final class SupabaseService {
         // AuthClient stores the session in the iOS Keychain automatically.
         // It also handles silent token refresh so we never need to call refresh manually.
         auth = AuthClient(configuration: .init(
-            url:          URL(string: "https://\(host)/auth/v1")!,
-            headers:      ["apikey": anonKey],
-            localStorage: KeychainLocalStorage()
+            url:                              URL(string: "https://\(host)/auth/v1")!,
+            headers:                          ["apikey": anonKey],
+            localStorage:                     KeychainLocalStorage(),
+            logger:                           nil,
+            emitLocalSessionAsInitialSession: true   // always emit local session on startup
         ))
 
         // Restore any persisted session synchronously so isSignedIn is correct
@@ -64,7 +66,7 @@ final class SupabaseService {
     // MARK: - Auth state observation
 
     private func observeAuthState() async {
-        for await (event, session) in await auth.authStateChanges {
+        for await (event, session) in auth.authStateChanges {
             await MainActor.run {
                 switch event {
                 case .signedIn, .tokenRefreshed, .userUpdated:
@@ -202,7 +204,7 @@ final class SupabaseService {
             sabbathMode:   profile.sabbathModeEnabled,
             appearance:    profile.appearanceRaw
         )
-        try? await makeDB(token: session.accessToken).from("profiles").upsert(payload).execute()
+        _ = try? await makeDB(token: session.accessToken).from("profiles").upsert(payload).execute()
     }
 
     func upsertStreakEntry(_ entry: StreakEntry) async {
@@ -217,7 +219,7 @@ final class SupabaseService {
             snoozeCount:       entry.snoozeCount,
             dismissedAt:       entry.dismissedAt.map { ISO8601DateFormatter().string(from: $0) }
         )
-        try? await makeDB(token: session.accessToken).from("streak_entries").upsert(payload).execute()
+        _ = try? await makeDB(token: session.accessToken).from("streak_entries").upsert(payload).execute()
     }
 
     // MARK: - Helpers
@@ -228,7 +230,8 @@ final class SupabaseService {
         PostgrestClient(
             url:     URL(string: "https://\(host)/rest/v1")!,
             schema:  "public",
-            headers: ["apikey": anonKey, "Authorization": "Bearer \(token)"]
+            headers: ["apikey": anonKey, "Authorization": "Bearer \(token)"],
+            logger:  nil
         )
     }
 }
