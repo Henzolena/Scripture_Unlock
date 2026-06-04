@@ -131,11 +131,11 @@ struct BibleView: View {
     /// reader opens directly at the right chapter.
     private func handleDeepLink(_ link: BibleDeepLink) {
         // Always open NIV for VOTD deep-links
-        selectedLanguage = link.language.isEmpty ? "niv" : link.language
+        selectedLanguage = "niv"
 
         Task {
-            // Ensure books are loaded in the target language
-            if books.isEmpty || books.first?.language != selectedLanguage {
+            // Ensure NIV books are loaded (reload if currently on a different language)
+            if books.isEmpty {
                 await loadBooks()
             }
             guard let book = books.first(where: {

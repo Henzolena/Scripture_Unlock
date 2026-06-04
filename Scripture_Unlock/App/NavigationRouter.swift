@@ -14,11 +14,12 @@ final class NavigationRouter {
 }
 
 /// Destination for a "Go to verse" deep-link.
-struct BibleDeepLink {
+struct BibleDeepLink: Equatable {
     let book:     String   // abbreviation e.g. "EPH"
     let bookName: String   // display name e.g. "Ephesians"
     let chapter:  Int
     let verse:    Int
+    // Always navigates to NIV — the VOTD language
 }
 
 /// Navigation value pushed onto the BibleView NavigationStack when a chapter
