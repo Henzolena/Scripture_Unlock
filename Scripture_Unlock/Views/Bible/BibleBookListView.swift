@@ -1,17 +1,32 @@
 import SwiftUI
 
-/// Shows all 66 Bible books grouped into Old Testament / New Testament sections.
+/// Shows all 66 Bible books grouped into Old Testament / New Testament sections,
+/// with a live search bar for quick navigation.
 struct BibleBookListView: View {
 
     let books:     [BibleBook]
     let language:  String
     let isLoading: Bool
 
-    /// Audio availability index fetched from /coverage/{lang} — abbrev → hasAudio
-    @State private var audioIndex: [String: Bool] = [:]
+    @State private var searchText    = ""
+    @State private var audioIndex:   [String: Bool] = [:]
 
-    private var oldTestament: [BibleBook] { books.filter { $0.testament == "OT" } }
-    private var newTestament: [BibleBook] { books.filter { $0.testament == "NT" } }
+    private var oldTestament: [BibleBook] {
+        filtered(books.filter { $0.testament == "OT" })
+    }
+    private var newTestament: [BibleBook] {
+        filtered(books.filter { $0.testament == "NT" })
+    }
+
+    private func filtered(_ list: [BibleBook]) -> [BibleBook] {
+        guard !searchText.isEmpty else { return list }
+        let q = searchText.lowercased()
+        return list.filter {
+            $0.name.lowercased().contains(q) ||
+            $0.englishName.lowercased().contains(q) ||
+            $0.abbreviation.lowercased().contains(q)
+        }
+    }
 
     // MARK: - Body
 
@@ -25,13 +40,11 @@ struct BibleBookListView: View {
                 bookList
             }
         }
-        // Destination registered here — picked up by the parent NavigationStack in BibleView
         .navigationDestination(for: BibleBook.self) { book in
             BibleChapterGridView(book: book, language: language)
         }
         .background(DesignSystem.warmCream)
         .task(id: language) {
-            // Fetch coverage for this language — cached after first load
             if let cov = await EthiopianBibleService.shared.coverage(language: language) {
                 audioIndex = cov.bookIndex.mapValues { $0.audio }
             }
@@ -42,13 +55,37 @@ struct BibleBookListView: View {
 
     private var bookList: some View {
         ScrollView {
+            // Search bar
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(DesignSystem.slate400)
+                    .font(.system(size: 14))
+                TextField("Search books…", text: $searchText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(DesignSystem.ink)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(DesignSystem.slate400)
+                            .font(.system(size: 14))
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(DesignSystem.surface)
+            .cornerRadius(12)
+            .shadow(color: DesignSystem.shadow1, radius: 4, x: 0, y: 1)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
 
-                // Old Testament
                 if !oldTestament.isEmpty {
                     Section {
                         ForEach(oldTestament) { book in
-                            // Value-based link — no gesture conflicts, reliable in ScrollView
                             NavigationLink(value: book) {
                                 BookRow(book: book, hasAudio: audioIndex[book.abbreviation] ?? false)
                             }
@@ -56,11 +93,10 @@ struct BibleBookListView: View {
                             .padding(.horizontal, 20)
                         }
                     } header: {
-                        sectionHeader("Old Testament")
+                        sectionHeader("Old Testament", count: books.filter { $0.testament == "OT" }.count)
                     }
                 }
 
-                // New Testament
                 if !newTestament.isEmpty {
                     Section {
                         ForEach(newTestament) { book in
@@ -71,8 +107,12 @@ struct BibleBookListView: View {
                             .padding(.horizontal, 20)
                         }
                     } header: {
-                        sectionHeader("New Testament")
+                        sectionHeader("New Testament", count: books.filter { $0.testament == "NT" }.count)
                     }
+                }
+
+                if oldTestament.isEmpty && newTestament.isEmpty && !searchText.isEmpty {
+                    noResultsView
                 }
             }
             .padding(.bottom, 32)
@@ -82,7 +122,7 @@ struct BibleBookListView: View {
 
     // MARK: - Section header
 
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: String, count: Int) -> some View {
         HStack(spacing: 8) {
             GoldRule(width: 18)
             Text(title.uppercased())
@@ -90,13 +130,16 @@ struct BibleBookListView: View {
                 .tracking(2)
                 .foregroundStyle(DesignSystem.slate600)
             Spacer()
+            Text("\(count) books")
+                .font(.system(size: 11))
+                .foregroundStyle(DesignSystem.slate400)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(DesignSystem.warmCream)
     }
 
-    // MARK: - Loading / empty states
+    // MARK: - Loading / empty / no-results states
 
     private var loadingView: some View {
         VStack(spacing: 16) {
@@ -126,6 +169,20 @@ struct BibleBookListView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private var noResultsView: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 32))
+                .foregroundStyle(DesignSystem.slate400)
+            Text("No books match \"\(searchText)\"")
+                .font(.system(size: 14))
+                .foregroundStyle(DesignSystem.slate400)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 60)
+        .frame(maxWidth: .infinity)
+    }
 }
 
 // MARK: - Book row
@@ -149,7 +206,7 @@ private struct BookRow: View {
             // Book names
             VStack(alignment: .leading, spacing: 3) {
                 Text(book.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DesignSystem.ink)
                     .lineLimit(1)
                 if book.name != book.englishName {
@@ -162,15 +219,15 @@ private struct BookRow: View {
 
             Spacer()
 
-            // Audio available indicator
+            // Audio indicator
             if hasAudio {
                 Image(systemName: "headphones")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(DesignSystem.pastoralGold.opacity(0.7))
+                    .foregroundStyle(DesignSystem.pastoralGold.opacity(0.65))
             }
 
-            // Chapter count
-            HStack(spacing: 3) {
+            // Chapter count chip
+            HStack(spacing: 2) {
                 Text("\(book.chapterCount)")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(DesignSystem.pastoralGold)
@@ -181,24 +238,24 @@ private struct BookRow: View {
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(DesignSystem.slate400)
+                .foregroundStyle(DesignSystem.slate400.opacity(0.6))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(DesignSystem.surface)
         .cornerRadius(14)
-        .shadow(color: DesignSystem.shadow1, radius: 4, x: 0, y: 2)
+        .shadow(color: DesignSystem.shadow1, radius: 4, x: 0, y: 1)
         .padding(.vertical, 4)
     }
 }
 
-// MARK: - Press animation ButtonStyle for book rows
+// MARK: - Press animation
 
 private struct BookRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.75 : 1.0)
+            .opacity(configuration.isPressed ? 0.72 : 1.0)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

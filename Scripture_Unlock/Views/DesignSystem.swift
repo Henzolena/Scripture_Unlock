@@ -200,29 +200,83 @@ struct PrimaryButton: View {
 // MARK: - VerseCard
 
 struct VerseCard: View {
-    let reference: String
-    let text: String
-    let translation: String
+    let reference:    String
+    let text:         String
+    let translation:  String
+    /// "pending" | "generating" | "ready" | "failed" | nil
+    var audioStatus:  String?       = nil
+    var isPlaying:    Bool          = false
+    /// True while on-demand generation is in progress (iOS-side polling)
+    var isGenerating: Bool          = false
+    var onPlayAudio:  (() -> Void)? = nil
+
+    private var showAudioButton: Bool {
+        guard let s = audioStatus else { return false }
+        return s != "failed"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header row
             HStack(spacing: 8) {
-                GoldSeal(size: 20)
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DesignSystem.pastoralGold)
                 Text("Verse for today")
                     .font(.system(size: 10, weight: .bold))
                     .tracking(2.5)
                     .foregroundStyle(DesignSystem.pastoralGold)
                     .textCase(.uppercase)
+                Spacer()
+                if showAudioButton, let play = onPlayAudio {
+                    Button(action: play) {
+                        if isGenerating {
+                            // Generating on-demand — show spinner
+                            ProgressView()
+                                .scaleEffect(0.75)
+                                .tint(DesignSystem.pastoralGold)
+                                .frame(width: 24, height: 24)
+                        } else if audioStatus == "ready" {
+                            // Ready — gold play/pause
+                            Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(DesignSystem.pastoralGold)
+                                .symbolEffect(.pulse, isActive: isPlaying)
+                        } else {
+                            // Pending — muted play icon (tap triggers generation)
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 24))
+                                .foregroundStyle(DesignSystem.slate400)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
-            Text("\u{201C}\(text)\u{201D}")
-                .font(DesignSystem.serif(17, italic: true))
-                .foregroundStyle(DesignSystem.ink)
-                .fixedSize(horizontal: false, vertical: true)
+            // Decorative left-border quote
+            HStack(alignment: .top, spacing: 12) {
+                Rectangle()
+                    .fill(DesignSystem.goldGradient)
+                    .frame(width: 3)
+                    .cornerRadius(2)
 
-            Text("\(reference) · \(translation)")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(DesignSystem.royalBlue)
+                Text("\u{201C}\(text)\u{201D}")
+                    .font(DesignSystem.serif(16, italic: true))
+                    .foregroundStyle(DesignSystem.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Reference + translation badge
+            HStack(spacing: 8) {
+                Text(reference)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DesignSystem.royalBlue)
+                Text("·")
+                    .foregroundStyle(DesignSystem.slate400)
+                Text(translation)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DesignSystem.slate400)
+            }
         }
         .padding(18)
         .overlay(alignment: .top) {

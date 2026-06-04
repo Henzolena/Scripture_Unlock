@@ -16,9 +16,11 @@ import SwiftData
 //   isSignedIn, isSyncing, userEmail, syncStatus
 //   handleSignInResult(_:)   call from SignInWithAppleButton onCompletion
 //   signOut()
-//   syncFromCloud(context:)  pull cloud → local SwiftData
+//   syncFromCloud(context:)  pull cloud → local SwiftData (profile, streaks, alarms)
 //   upsertProfile(_:)        push local profile change → cloud
 //   upsertStreakEntry(_:)    push local streak entry → cloud
+//   upsertAlarm(_:)          push alarm create/edit/toggle → cloud
+//   deleteAlarm(id:)         remove alarm from cloud on delete
 
 @Observable
 final class SupabaseService {
@@ -140,7 +142,7 @@ final class SupabaseService {
             let uid     = session.user.id.uuidString
             let db      = makeDB(token: session.accessToken)
 
-            // Fetch profile + streaks in parallel
+            // Fetch profile, streaks, and alarms in parallel
             async let profileFetch: [RemoteProfile]    = db.from("profiles")
                 .select()
                 .eq("id", value: uid)
@@ -152,18 +154,33 @@ final class SupabaseService {
                 .order("date", ascending: false)
                 .execute()
                 .value
+            async let alarmFetch: [RemoteAlarm]        = db.from("alarms")
+                .select()
+                .eq("user_id", value: uid)
+                .execute()
+                .value
 
-            let (profiles, streaks) = try await (profileFetch, streakFetch)
+            let (profiles, streaks, remoteAlarms) = try await (profileFetch, streakFetch, alarmFetch)
 
-            // Apply remote profile to local SwiftData
+            // Apply remote profile to local SwiftData.
+            // If the remote row has no name it was just auto-created by the
+            // handle_new_user trigger (first sign-in after onboarding). In that
+            // case push local settings up so the DB gets the real values.
+            // Otherwise the cloud is authoritative and we overwrite locally.
             if let remote = profiles.first,
                let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first {
-                if !remote.name.isEmpty { profile.name = remote.name }
-                profile.activePackId       = remote.activePackId
-                profile.questionCount      = remote.questionCount
-                profile.snoozeTaxEnabled   = remote.snoozeTax
-                profile.sabbathModeEnabled = remote.sabbathMode
-                profile.appearanceRaw      = remote.appearance
+                if remote.name.isEmpty {
+                    await upsertProfile(profile)
+                } else {
+                    profile.name                        = remote.name
+                    profile.activePackId               = remote.activePackId
+                    profile.questionCount              = remote.questionCount
+                    profile.snoozeTaxEnabled           = remote.snoozeTax
+                    profile.sabbathModeEnabled         = remote.sabbathMode
+                    profile.appearanceRaw              = remote.appearance
+                    profile.parallelLanguage           = remote.parallelLanguage
+                    profile.accountabilityPartnerEmail = remote.accountabilityPartnerEmail
+                }
             }
 
             // Replace local streaks with cloud (cloud is authoritative when signed in)
@@ -182,6 +199,54 @@ final class SupabaseService {
                 context.insert(entry)
             }
 
+            // Merge cloud alarms into local SwiftData (cloud is authoritative)
+            let localAlarms  = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
+            let remoteIdSet  = Set(remoteAlarms.compactMap { UUID(uuidString: $0.id) })
+
+            // Cancel + remove alarms that were deleted on another device
+            for local in localAlarms where !remoteIdSet.contains(local.id) {
+                await AlarmService.shared.cancel(local)
+                context.delete(local)
+            }
+
+            // Insert or update alarms from cloud
+            for remote in remoteAlarms {
+                guard let remoteId = UUID(uuidString: remote.id) else { continue }
+                if let existing = localAlarms.first(where: { $0.id == remoteId }) {
+                    existing.label          = remote.label
+                    existing.hour           = remote.hour
+                    existing.minute         = remote.minute
+                    existing.isAM           = remote.isAM
+                    existing.isEnabled      = remote.isEnabled
+                    existing.repeatDays     = remote.repeatDays
+                    existing.packId         = remote.packId
+                    existing.translationRaw = remote.translationRaw
+                    existing.difficultyRaw  = remote.difficultyRaw
+                    existing.questionCount  = remote.questionCount
+                    existing.toneIdentifier = remote.toneIdentifier
+                } else {
+                    let alarm = Alarm()
+                    alarm.id             = remoteId
+                    alarm.label          = remote.label
+                    alarm.hour           = remote.hour
+                    alarm.minute         = remote.minute
+                    alarm.isAM           = remote.isAM
+                    alarm.isEnabled      = remote.isEnabled
+                    alarm.repeatDays     = remote.repeatDays
+                    alarm.packId         = remote.packId
+                    alarm.translationRaw = remote.translationRaw
+                    alarm.difficultyRaw  = remote.difficultyRaw
+                    alarm.questionCount  = remote.questionCount
+                    alarm.toneIdentifier = remote.toneIdentifier
+                    alarm.createdAt      = isoFmt.date(from: remote.createdAt) ?? Date()
+                    context.insert(alarm)
+                }
+            }
+
+            // Reschedule all enabled alarms so they fire on this device
+            let allAlarms = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
+            await AlarmService.shared.rescheduleAll(allAlarms)
+
             syncStatus = "✅ Synced · \(Date().formatted(.dateTime.hour().minute()))"
 
         } catch {
@@ -196,13 +261,15 @@ final class SupabaseService {
         guard isSignedIn else { return }
         guard let session = try? await auth.session else { return }
         let payload = ProfilePayload(
-            id:            session.user.id.uuidString,
-            name:          profile.name,
-            activePackId:  profile.activePackId,
-            questionCount: profile.questionCount,
-            snoozeTax:     profile.snoozeTaxEnabled,
-            sabbathMode:   profile.sabbathModeEnabled,
-            appearance:    profile.appearanceRaw
+            id:                           session.user.id.uuidString,
+            name:                         profile.name,
+            activePackId:                 profile.activePackId,
+            questionCount:                profile.questionCount,
+            snoozeTax:                    profile.snoozeTaxEnabled,
+            sabbathMode:                  profile.sabbathModeEnabled,
+            appearance:                   profile.appearanceRaw,
+            parallelLanguage:             profile.parallelLanguage,
+            accountabilityPartnerEmail:   profile.accountabilityPartnerEmail
         )
         _ = try? await makeDB(token: session.accessToken).from("profiles").upsert(payload).execute()
     }
@@ -222,6 +289,39 @@ final class SupabaseService {
         _ = try? await makeDB(token: session.accessToken).from("streak_entries").upsert(payload).execute()
     }
 
+    func upsertAlarm(_ alarm: Alarm) async {
+        guard isSignedIn else { return }
+        guard let session = try? await auth.session else { return }
+        let isoFmt = ISO8601DateFormatter()
+        let payload = AlarmPayload(
+            id:             alarm.id.uuidString,
+            userId:         session.user.id.uuidString,
+            label:          alarm.label,
+            hour:           alarm.hour,
+            minute:         alarm.minute,
+            isAM:           alarm.isAM,
+            isEnabled:      alarm.isEnabled,
+            repeatDays:     alarm.repeatDays,
+            packId:         alarm.packId,
+            translationRaw: alarm.translationRaw,
+            difficultyRaw:  alarm.difficultyRaw,
+            questionCount:  alarm.questionCount,
+            toneIdentifier: alarm.toneIdentifier,
+            createdAt:      isoFmt.string(from: alarm.createdAt)
+        )
+        _ = try? await makeDB(token: session.accessToken).from("alarms").upsert(payload).execute()
+    }
+
+    func deleteAlarm(id: UUID) async {
+        guard isSignedIn else { return }
+        guard let session = try? await auth.session else { return }
+        _ = try? await makeDB(token: session.accessToken)
+            .from("alarms")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .execute()
+    }
+
     // MARK: - Helpers
 
     /// Creates an authenticated PostgREST client for a single request batch.
@@ -239,19 +339,23 @@ final class SupabaseService {
 // MARK: - Remote DTOs (Decodable)
 
 private struct RemoteProfile: Decodable, Sendable {
-    let name:          String
-    let activePackId:  String
-    let questionCount: Int
-    let snoozeTax:     Bool
-    let sabbathMode:   Bool
-    let appearance:    String
+    let name:                         String
+    let activePackId:                 String
+    let questionCount:                Int
+    let snoozeTax:                    Bool
+    let sabbathMode:                  Bool
+    let appearance:                   String
+    let parallelLanguage:             String
+    let accountabilityPartnerEmail:   String
 
     enum CodingKeys: String, CodingKey {
         case name, appearance
-        case activePackId  = "active_pack_id"
-        case questionCount = "question_count"
-        case snoozeTax     = "snooze_tax"
-        case sabbathMode   = "sabbath_mode"
+        case activePackId                = "active_pack_id"
+        case questionCount               = "question_count"
+        case snoozeTax                   = "snooze_tax"
+        case sabbathMode                 = "sabbath_mode"
+        case parallelLanguage            = "parallel_language"
+        case accountabilityPartnerEmail  = "accountability_partner_email"
     }
 }
 
@@ -271,23 +375,87 @@ private struct RemoteStreakEntry: Decodable, Sendable {
     }
 }
 
+private struct RemoteAlarm: Decodable, Sendable {
+    let id:             String
+    let label:          String
+    let hour:           Int
+    let minute:         Int
+    let isAM:           Bool
+    let isEnabled:      Bool
+    let repeatDays:     [Int]
+    let packId:         String
+    let translationRaw: String
+    let difficultyRaw:  String
+    let questionCount:  Int
+    let toneIdentifier: String
+    let createdAt:      String
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, hour, minute
+        case isAM           = "is_am"
+        case isEnabled      = "is_enabled"
+        case repeatDays     = "repeat_days"
+        case packId         = "pack_id"
+        case translationRaw = "translation_raw"
+        case difficultyRaw  = "difficulty_raw"
+        case questionCount  = "question_count"
+        case toneIdentifier = "tone_identifier"
+        case createdAt      = "created_at"
+    }
+}
+
 // MARK: - Upsert payloads (Encodable)
 
 private struct ProfilePayload: Encodable {
-    let id:            String
-    let name:          String
-    let activePackId:  String
-    let questionCount: Int
-    let snoozeTax:     Bool
-    let sabbathMode:   Bool
-    let appearance:    String
+    let id:                           String
+    let name:                         String
+    let activePackId:                 String
+    let questionCount:                Int
+    let snoozeTax:                    Bool
+    let sabbathMode:                  Bool
+    let appearance:                   String
+    let parallelLanguage:             String
+    let accountabilityPartnerEmail:   String
 
     enum CodingKeys: String, CodingKey {
         case id, name, appearance
-        case activePackId  = "active_pack_id"
-        case questionCount = "question_count"
-        case snoozeTax     = "snooze_tax"
-        case sabbathMode   = "sabbath_mode"
+        case activePackId                = "active_pack_id"
+        case questionCount               = "question_count"
+        case snoozeTax                   = "snooze_tax"
+        case sabbathMode                 = "sabbath_mode"
+        case parallelLanguage            = "parallel_language"
+        case accountabilityPartnerEmail  = "accountability_partner_email"
+    }
+}
+
+private struct AlarmPayload: Encodable {
+    let id:             String
+    let userId:         String
+    let label:          String
+    let hour:           Int
+    let minute:         Int
+    let isAM:           Bool
+    let isEnabled:      Bool
+    let repeatDays:     [Int]
+    let packId:         String
+    let translationRaw: String
+    let difficultyRaw:  String
+    let questionCount:  Int
+    let toneIdentifier: String
+    let createdAt:      String
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, hour, minute
+        case userId         = "user_id"
+        case isAM           = "is_am"
+        case isEnabled      = "is_enabled"
+        case repeatDays     = "repeat_days"
+        case packId         = "pack_id"
+        case translationRaw = "translation_raw"
+        case difficultyRaw  = "difficulty_raw"
+        case questionCount  = "question_count"
+        case toneIdentifier = "tone_identifier"
+        case createdAt      = "created_at"
     }
 }
 

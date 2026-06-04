@@ -34,17 +34,23 @@ final class AlarmListViewModel {
             } else {
                 await alarmService.cancel(alarm)
             }
+            await SupabaseService.shared.upsertAlarm(alarm)
         }
     }
 
     func delete(_ alarm: Alarm, context: ModelContext) {
+        let id = alarm.id
         Task { await alarmService.cancel(alarm) }
+        Task { await SupabaseService.shared.deleteAlarm(id: id) }
         context.delete(alarm)
     }
 
     func save(_ alarm: Alarm, context: ModelContext) {
         context.insert(alarm)
-        Task { try? await alarmService.schedule(alarm) }
+        Task {
+            try? await alarmService.schedule(alarm)
+            await SupabaseService.shared.upsertAlarm(alarm)
+        }
     }
 
     // MARK: - Computed

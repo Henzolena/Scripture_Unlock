@@ -6,6 +6,8 @@ struct TriviaContainerView: View {
     let alarm: Alarm
     @State private var vm: TriviaViewModel
     @Query private var profiles: [UserProfile]
+    @Environment(\.modelContext) private var context
+    @Environment(SupabaseService.self)  private var supabase
 
     private var parallelLanguage: String { profiles.first?.parallelLanguage ?? "" }
 
@@ -60,6 +62,34 @@ struct TriviaContainerView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: vm.phase)
         .onAppear { if vm.phase == .ringing { vm.begin(language: parallelLanguage) } }
+        .onChange(of: vm.phase) { _, newPhase in
+            if case .dismissed = newPhase { saveStreakEntry() }
+        }
+    }
+
+    // MARK: - Streak persistence
+
+    /// Called once when the alarm is successfully dismissed.
+    /// Creates or updates today's StreakEntry and pushes it to Supabase.
+    private func saveStreakEntry() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let allEntries = (try? context.fetch(FetchDescriptor<StreakEntry>())) ?? []
+        let existing = allEntries.first {
+            Calendar.current.isDate($0.date, inSameDayAs: today)
+        }
+
+        let entry = existing ?? {
+            let e = StreakEntry(date: today)
+            context.insert(e)
+            return e
+        }()
+
+        entry.questionsAnswered += vm.totalAttempts
+        entry.questionsCorrect  += vm.completedSteps
+        entry.snoozeCount       += alarm.snoozeCountToday
+        entry.dismissedAt        = Date()
+
+        Task { await supabase.upsertStreakEntry(entry) }
     }
 
     @ViewBuilder
@@ -91,7 +121,31 @@ struct TriviaContainerView: View {
                     }
                 }
             }
+        } else if vm.isGeneratingQuestions {
+            generatingView
         }
+    }
+
+    /// Shown when the AI question cache is empty and generation is in progress.
+    private var generatingView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            ProgressView()
+                .scaleEffect(1.4)
+                .tint(DesignSystem.deepBlue)
+            VStack(spacing: 8) {
+                Text("Preparing your questions…")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(DesignSystem.ink)
+                Text("Personalised Bible trivia is being generated.\nThis only takes a moment.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(DesignSystem.slate600)
+                    .multilineTextAlignment(.center)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

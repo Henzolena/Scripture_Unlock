@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Onboarding pack picker — shows descriptions, not just names.
 struct PackPickerOnboard: View {
@@ -72,6 +73,7 @@ struct FirstAlarmView: View {
     let profile: UserProfile
     let onContinue: () -> Void
 
+    @Environment(\.modelContext) private var context
     @State private var selectedTime: Date = {
         var c = Calendar.current.dateComponents([.year,.month,.day], from: Date())
         c.hour = 6; c.minute = 0
@@ -190,11 +192,15 @@ struct FirstAlarmView: View {
 
     private func saveAlarm() {
         let comps = Calendar.current.dateComponents([.hour,.minute], from: selectedTime)
-        let h = comps.hour ?? 6
-        let alarm = Alarm(label: "Morning devotions", hour: h > 12 ? h - 12 : h, minute: comps.minute ?? 0)
-        alarm.isAM = h < 12
+        let h = comps.hour ?? 6   // 0-23
+        let isAM = h < 12
+        // Store as 0-11: noon (h=12) → 0, midnight (h=0) → 0
+        let hour12 = isAM ? h : h - 12
+        let alarm = Alarm(label: "Morning devotions", hour: hour12, minute: comps.minute ?? 0)
+        alarm.isAM = isAM
         alarm.repeatDays = selectedDays
         alarm.packId = profile.activePackId
+        context.insert(alarm)
         Task { try? await AlarmService.shared.schedule(alarm) }
     }
 }

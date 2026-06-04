@@ -100,29 +100,166 @@ final class QuestionGeneratorAgent {
 
         print("[QuestionGeneratorAgent] Generating \(targetCount) questions for \(packId)/\(difficulty.rawValue)")
 
+        // ── Priority 1: Centralized Railway API (same backend as study quiz) ──
+        let railwayQuestions = await generateViaRailwayAPI(
+            packId: packId, difficulty: difficulty,
+            count: targetCount, excluding: usedRefs
+        )
+        if !railwayQuestions.isEmpty {
+            await mergeIntoCacheAndSave(railwayQuestions, key: key)
+            print("[QuestionGeneratorAgent] Cached \(railwayQuestions.count) Railway questions for \(packId)/\(difficulty.rawValue)")
+            return
+        }
+
+        // ── Priority 2: On-device Gemini (fallback when Railway is unavailable) ──
+        print("[QuestionGeneratorAgent] Railway returned nothing — falling back to on-device Gemini")
         do {
             let prompt     = buildPrompt(packId: packId, difficulty: difficulty,
                                          exclude: usedRefs, count: targetCount)
             let jsonString = try await GeminiService.shared.generate(prompt: prompt)
             let raw        = try parseQuestions(from: jsonString, packId: packId, difficulty: difficulty)
             let validated  = await validate(raw)
-
-            await MainActor.run {
-                var slot = self.cache[key] ?? []
-                for q in validated {
-                    if !slot.contains(where: { $0.id == q.id || $0.verseRef == q.verseRef }) {
-                        slot.append(q)
-                    }
-                }
-                self.cache[key] = Array(slot.prefix(self.maxCacheSize))
-                self.saveCacheToDisk(key: key)
-            }
-
-            print("[QuestionGeneratorAgent] Cached \(validated.count) valid questions for \(packId)/\(difficulty.rawValue)")
+            await mergeIntoCacheAndSave(validated, key: key)
+            print("[QuestionGeneratorAgent] Cached \(validated.count) Gemini questions for \(packId)/\(difficulty.rawValue)")
         } catch {
-            print("[QuestionGeneratorAgent] Generation failed: \(error.localizedDescription)")
+            print("[QuestionGeneratorAgent] Both Railway and Gemini failed: \(error.localizedDescription)")
         }
     }
+
+    /// Merge new questions into the cache slot and persist to disk.
+    private func mergeIntoCacheAndSave(_ questions: [TriviaQuestion], key: String) async {
+        await MainActor.run {
+            var slot = self.cache[key] ?? []
+            for q in questions {
+                if !slot.contains(where: { $0.id == q.id || $0.verseRef == q.verseRef }) {
+                    slot.append(q)
+                }
+            }
+            self.cache[key] = Array(slot.prefix(self.maxCacheSize))
+            self.saveCacheToDisk(key: key)
+        }
+    }
+
+    // MARK: - Railway API generation
+
+    /// Calls the centralized Railway API (same backend as the study quiz in Bible Reader).
+    /// Makes several calls spread across different books/chapters for the pack.
+    private func generateViaRailwayAPI(
+        packId: String,
+        difficulty: Difficulty,
+        count: Int,
+        excluding usedRefs: Set<String>
+    ) async -> [TriviaQuestion] {
+        let books = Self.packBooks[packId] ?? ["Psalms"]
+        var results: [TriviaQuestion] = []
+        // Each Railway call generates ~5 questions; make enough calls to reach targetCount
+        let callsNeeded = max(2, Int(ceil(Double(count) / 5.0)))
+
+        for _ in 0..<callsNeeded {
+            guard results.count < count else { break }
+            // Pick a random book and chapter from this pack
+            guard let bookName = books.randomElement(),
+                  let abbr     = Self.bookAbbreviations[bookName],
+                  let maxCh    = Self.bookChapterCounts[abbr]
+            else { continue }
+            let chapter = Int.random(in: 1...maxCh)
+
+            let outcome = await QuizService.shared.generateQuestions(
+                book:       abbr,
+                chapter:    chapter,
+                verseStart: 1, verseEnd: 30,
+                language:   "en",
+                difficulty: difficulty.railwayValue,
+                count:      5,
+                save:       true
+            )
+            guard case .success(let qs) = outcome else { continue }
+
+            let converted = qs.compactMap { convertToTriviaQuestion($0, packId: packId, difficulty: difficulty) }
+                              .filter { !usedRefs.contains($0.verseRef) }
+            results.append(contentsOf: converted)
+        }
+
+        return Array(results.prefix(count))
+    }
+
+    /// Converts a Railway `QuizQuestion` (MCQ only) to the app's `TriviaQuestion`.
+    /// `verseText` is left empty — `RevealView` fetches it live from the Bible API.
+    private func convertToTriviaQuestion(
+        _ q: QuizQuestion,
+        packId: String,
+        difficulty: Difficulty
+    ) -> TriviaQuestion? {
+        // correctAnswer is a letter "A"/"B"/"C"/"D" — convert to 0-based index
+        let letterOrder = ["A", "B", "C", "D"]
+        guard let answerIndex = letterOrder.firstIndex(of: q.correctAnswer) else { return nil }
+        let options = q.options.map { $0.text }
+        guard options.count == 4, !options.contains(where: { $0.isEmpty }) else { return nil }
+
+        // Build a stable id from the verse ref so duplicates are detected across caches
+        let safeRef = q.verseRef
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: ":", with: ".")
+        let id = "\(safeRef)-railway-mcq"
+
+        return TriviaQuestion(
+            id:         id,
+            kind:       .mcq,
+            book:       q.bookName,
+            packId:     packId,
+            difficulty: difficulty,
+            prompt:     q.question,
+            options:    options,
+            answerIndex: answerIndex,
+            fillPre:    nil,
+            fillPost:   nil,
+            verseRef:   q.verseRef,
+            verseText:  ""   // fetched lazily by RevealView via EthiopianBibleService
+        )
+    }
+
+    // MARK: - Book metadata
+
+    /// Maps full English book names (as used in packBooks) to Railway API abbreviations.
+    static let bookAbbreviations: [String: String] = [
+        // Old Testament
+        "Genesis": "GEN", "Exodus": "EXO", "Leviticus": "LEV",
+        "Numbers": "NUM", "Deuteronomy": "DEU", "Joshua": "JOS",
+        "Judges": "JDG", "Ruth": "RUT", "1 Samuel": "1SA", "2 Samuel": "2SA",
+        "1 Kings": "1KI", "2 Kings": "2KI", "1 Chronicles": "1CH", "2 Chronicles": "2CH",
+        "Ezra": "EZR", "Nehemiah": "NEH", "Esther": "EST", "Job": "JOB",
+        "Psalms": "PSA", "Proverbs": "PRO", "Ecclesiastes": "ECC",
+        "Song of Solomon": "SNG", "Isaiah": "ISA", "Jeremiah": "JER",
+        "Lamentations": "LAM", "Ezekiel": "EZK", "Daniel": "DAN",
+        "Hosea": "HOS", "Joel": "JOL", "Amos": "AMO", "Obadiah": "OBA",
+        "Jonah": "JON", "Micah": "MIC", "Nahum": "NAH", "Habakkuk": "HAB",
+        "Zephaniah": "ZEP", "Haggai": "HAG", "Zechariah": "ZEC", "Malachi": "MAL",
+        // New Testament
+        "Matthew": "MAT", "Mark": "MRK", "Luke": "LUK", "John": "JHN",
+        "Acts": "ACT", "Romans": "ROM", "1 Corinthians": "1CO", "2 Corinthians": "2CO",
+        "Galatians": "GAL", "Ephesians": "EPH", "Philippians": "PHP", "Colossians": "COL",
+        "1 Thessalonians": "1TH", "2 Thessalonians": "2TH",
+        "1 Timothy": "1TI", "2 Timothy": "2TI", "Titus": "TIT", "Philemon": "PHM",
+        "Hebrews": "HEB", "James": "JAS", "1 Peter": "1PE", "2 Peter": "2PE",
+        "1 John": "1JN", "2 John": "2JN", "3 John": "3JN", "Jude": "JUD",
+    ]
+
+    /// Chapter counts keyed by Railway abbreviation.
+    static let bookChapterCounts: [String: Int] = [
+        "GEN": 50, "EXO": 40, "LEV": 27, "NUM": 36, "DEU": 34,
+        "JOS": 24, "JDG": 21, "RUT": 4,  "1SA": 31, "2SA": 24,
+        "1KI": 22, "2KI": 25, "1CH": 29, "2CH": 36, "EZR": 10,
+        "NEH": 13, "EST": 10, "JOB": 42, "PSA": 150,"PRO": 31,
+        "ECC": 12, "SNG": 8,  "ISA": 66, "JER": 52, "LAM": 5,
+        "EZK": 48, "DAN": 12, "HOS": 14, "JOL": 3,  "AMO": 9,
+        "OBA": 1,  "JON": 4,  "MIC": 7,  "NAH": 3,  "HAB": 3,
+        "ZEP": 3,  "HAG": 2,  "ZEC": 14, "MAL": 4,
+        "MAT": 28, "MRK": 16, "LUK": 24, "JHN": 21, "ACT": 28,
+        "ROM": 16, "1CO": 16, "2CO": 13, "GAL": 6,  "EPH": 6,
+        "PHP": 4,  "COL": 4,  "1TH": 5,  "2TH": 3,  "1TI": 6,
+        "2TI": 4,  "TIT": 3,  "PHM": 1,  "HEB": 13, "JAS": 5,
+        "1PE": 5,  "2PE": 3,  "1JN": 5,  "2JN": 1,  "3JN": 1, "JUD": 1,
+    ]
 
     // MARK: - Prompt builder
 

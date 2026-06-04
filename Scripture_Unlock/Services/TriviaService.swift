@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Question priority
 /// ─────────────────
-/// 1. AI-generated questions from QuestionGeneratorAgent cache (validated)
-/// 2. Static sample questions bundled with the app (always available)
+/// 1. AI-generated questions from QuestionGeneratorAgent cache (Railway API or Gemini)
+/// 2. Returns nil when cache is empty — the ViewModel shows a "Generating…" state
 ///
 /// The agent is asked to prefetch more questions whenever the cache is low;
 /// this never blocks question delivery.
@@ -34,7 +34,7 @@ final class TriviaService {
         // Kick off background generation so the cache stays warm for next time
         agent.prefetchIfNeeded(forPack: packId, difficulty: difficulty)
 
-        // Priority 1: AI-generated questions from the agent cache
+        // AI-generated questions from the agent cache (Railway API or Gemini fallback)
         let generated = agent.questions(forPack: packId, difficulty: difficulty)
         let generatedPool = generated.filter {
             !excluding.contains($0.id) && !sessionUsedIds.contains($0.id)
@@ -44,22 +44,9 @@ final class TriviaService {
             return q
         }
 
-        // Priority 2: Static samples — filter by pack + difficulty first
-        let staticPool = TriviaQuestion.samples.filter {
-            $0.packId == packId &&
-            $0.difficulty == difficulty &&
-            !excluding.contains($0.id) &&
-            !sessionUsedIds.contains($0.id)
-        }
-        if let q = staticPool.randomElement() { return q }
-
-        // Fallback: any static sample not yet excluded
-        let anyPool = TriviaQuestion.samples.filter {
-            $0.packId == packId && !excluding.contains($0.id)
-        }
-        if let q = anyPool.randomElement() { return q }
-
-        return TriviaQuestion.samples.filter { !excluding.contains($0.id) }.randomElement()
+        // Cache is empty — background generation was already triggered by prefetchIfNeeded.
+        // Return nil so the ViewModel can show a "generating" state instead of a stale question.
+        return nil
     }
 
     /// Anti-cheese: pick a replacement after a wrong answer.
@@ -73,7 +60,7 @@ final class TriviaService {
         var excl = excluding
         excl.insert(missed.id)
 
-        // Try AI cache first — different book required
+        // Try AI cache — different book required
         let generated = agent.questions(forPack: packId, difficulty: difficulty)
         let genDiffBook = generated.filter {
             $0.book != missed.book && !excl.contains($0.id)
@@ -83,20 +70,15 @@ final class TriviaService {
             return q
         }
 
-        // Fall back to static samples
-        let staticDiffBook = TriviaQuestion.samples.filter {
-            $0.packId == packId &&
-            $0.book != missed.book &&
-            !excl.contains($0.id)
+        // Try any cached question regardless of book (different book preference exhausted)
+        let genAny = generated.filter { !excl.contains($0.id) }
+        if let q = genAny.randomElement() {
+            agent.consume(q)
+            return q
         }
-        if let q = staticDiffBook.randomElement() { return q }
 
-        let anyPackDiffBook = TriviaQuestion.samples.filter {
-            $0.book != missed.book && !excl.contains($0.id)
-        }
-        if let q = anyPackDiffBook.randomElement() { return q }
-
-        return TriviaQuestion.samples.filter { !excl.contains($0.id) }.randomElement()
+        // Cache is empty — return nil; ViewModel will show "generating" state
+        return nil
     }
 
     // MARK: - Session management

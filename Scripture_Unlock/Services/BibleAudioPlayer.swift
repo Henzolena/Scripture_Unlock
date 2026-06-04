@@ -66,7 +66,12 @@ final class BibleAudioPlayer {
     // MARK: - Init / deinit
 
     init() {
-        configureAudioSession()
+        // Configure audio session off the main thread — setActive(true) is a
+        // blocking IPC call to the system audio daemon and can freeze the UI
+        // if called synchronously during view initialisation.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            self?.configureAudioSession()
+        }
         registerRemoteCommands()
     }
 
@@ -234,7 +239,9 @@ final class BibleAudioPlayer {
 
     /// Publish the full Now Playing dictionary (called once when readyToPlay).
     private func publishNowPlaying() {
-        var info: [String: Any] = [
+        // Publish immediately without artwork, then add artwork asynchronously
+        // to avoid rendering a 600×600 UIImage on the main thread.
+        let info: [String: Any] = [
             MPMediaItemPropertyTitle:                   nowPlayingTitle,
             MPMediaItemPropertyArtist:                  nowPlayingArtist,
             MPMediaItemPropertyAlbumTitle:              "Holy Bible",
@@ -243,13 +250,16 @@ final class BibleAudioPlayer {
             MPNowPlayingInfoPropertyPlaybackRate:        isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
         ]
-
-        // Bible scroll artwork — use SF Symbol rendered into UIImage
-        if let artwork = makeArtwork() {
-            info[MPMediaItemPropertyArtwork] = artwork
-        }
-
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+
+        // Render artwork on a background thread, then splice it in
+        Task.detached(priority: .utility) {
+            if let artwork = self.makeArtwork() {
+                await MainActor.run {
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] = artwork
+                }
+            }
+        }
     }
 
     /// Lightweight update — only rate + elapsed time (no artwork re-render).
@@ -261,7 +271,9 @@ final class BibleAudioPlayer {
     }
 
     /// Render a simple bible-scroll SF Symbol as the lock screen artwork.
-    private func makeArtwork() -> MPMediaItemArtwork? {
+    /// `nonisolated` so it can safely be called from a detached Task without
+    /// crossing actor boundaries (UIGraphicsImageRenderer is thread-safe).
+    nonisolated private func makeArtwork() -> MPMediaItemArtwork? {
         let size = CGSize(width: 600, height: 600)
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { ctx in
@@ -373,7 +385,9 @@ final class BibleAudioPlayer {
 
     // MARK: - Audio session
 
-    private func configureAudioSession() {
+    /// `nonisolated` — AVAudioSession calls are thread-safe and intentionally
+    /// run off the main thread to avoid blocking the UI on startup.
+    nonisolated private func configureAudioSession() {
         do {
             try AVAudioSession.sharedInstance().setCategory(
                 .playback,

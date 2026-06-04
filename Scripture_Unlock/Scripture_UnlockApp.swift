@@ -11,8 +11,9 @@ import SwiftData
 @main
 struct Scripture_UnlockApp: App {
 
-    @State private var alarmService = AlarmService.shared
-    @State private var triviaService = TriviaService.shared
+    @State private var alarmService   = AlarmService.shared
+    @State private var triviaService  = TriviaService.shared
+    @State private var supabaseService = SupabaseService.shared
 
     init() {
         // Touch AlarmService early so UNUserNotificationCenter.delegate is
@@ -38,6 +39,7 @@ struct Scripture_UnlockApp: App {
                 .modelContainer(for: [Alarm.self, UserProfile.self, StreakEntry.self])
                 .environment(alarmService)
                 .environment(triviaService)
+                .environment(supabaseService)
         }
     }
 }

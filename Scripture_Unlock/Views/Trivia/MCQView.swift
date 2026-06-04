@@ -33,17 +33,8 @@ struct MCQView: View {
             Spacer(minLength: 32)
 
             HStack {
-                Button {
-                    // TODO: show hint sheet
-                } label: {
-                    Label("Show hint", systemImage: "book")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DesignSystem.royalBlue)
-                }
-
                 Spacer()
-
-                Text("ESV · \(VersePack.find(question.packId).name)")
+                Text("\(VersePack.find(question.packId).name)")
                     .font(.system(size: 12))
                     .foregroundStyle(DesignSystem.slate400)
             }
@@ -62,16 +53,6 @@ struct MCQView: View {
                 .tracking(2)
                 .textCase(.uppercase)
                 .foregroundStyle(DesignSystem.pastoralGold)
-
-            if question.isAIGenerated {
-                Text("✦ AI")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(1)
-                    .foregroundStyle(DesignSystem.pastoralGold.opacity(0.7))
-                    .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(DesignSystem.pastoralGold.opacity(0.12))
-                    .clipShape(Capsule())
-            }
         }
     }
 }

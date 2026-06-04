@@ -83,12 +83,16 @@ final class EthiopianBibleService {
     // MARK: - Book number lookup (OT + NT canonical order)
 
     private static let bookNumbers: [String: Int] = {
-        let names = [
+        let names: [String: Int] = [
             "genesis":1,"exodus":2,"leviticus":3,"numbers":4,"deuteronomy":5,
             "joshua":6,"judges":7,"ruth":8,"1samuel":9,"2samuel":10,
             "1kings":11,"2kings":12,"1chronicles":13,"2chronicles":14,
             "ezra":15,"nehemiah":16,"esther":17,"job":18,"psalms":19,"psalm":19,
-            "proverbs":20,"ecclesiastes":21,"song":22,"isaiah":23,"jeremiah":24,
+            "proverbs":20,"ecclesiastes":21,
+            // Song of Solomon — multiple common spellings
+            "song":22,"songofsolomon":22,"songofsolomons":22,
+            "songofsonglemon":22,"songofsongs":22,"songs":22,"canticles":22,
+            "isaiah":23,"jeremiah":24,
             "lamentations":25,"ezekiel":26,"daniel":27,"hosea":28,"joel":29,
             "amos":30,"obadiah":31,"jonah":32,"micah":33,"nahum":34,
             "habakkuk":35,"zephaniah":36,"haggai":37,"zechariah":38,"malachi":39,
@@ -97,7 +101,8 @@ final class EthiopianBibleService {
             "ephesians":49,"philippians":50,"colossians":51,"1thessalonians":52,
             "2thessalonians":53,"1timothy":54,"2timothy":55,"titus":56,
             "philemon":57,"hebrews":58,"james":59,"1peter":60,"2peter":61,
-            "1john":62,"2john":63,"3john":64,"jude":65,"revelation":66
+            "1john":62,"2john":63,"3john":64,"jude":65,
+            "revelation":66,"revelations":66,"apocalypse":66,
         ]
         return names
     }()

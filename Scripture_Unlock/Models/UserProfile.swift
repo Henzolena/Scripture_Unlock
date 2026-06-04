@@ -17,6 +17,8 @@ final class UserProfile {
     /// "am" = Amharic · "or" = Oromo · "ti" = Tigrigna · "" = off
     var parallelLanguage: String = ""
     var accountabilityPartnerEmail: String = ""
+    /// "system" | "light" | "dark"
+    var appearanceRaw: String = "system"
     var createdAt: Date = Date()
 
     init() {}

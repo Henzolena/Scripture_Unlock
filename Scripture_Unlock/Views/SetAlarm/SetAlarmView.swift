@@ -2,10 +2,18 @@ import SwiftUI
 import SwiftData
 
 struct SetAlarmView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss)       private var dismiss
+    @Environment(\.modelContext)  private var context
+    @Environment(SupabaseService.self) private var supabase
     @State var alarm: Alarm
     var isNew: Bool = true
+
+    @State private var showTonePicker = false
+    @State private var previewPlayer  = TonePreviewPlayer.shared
+
+    private var selectedTone: AlarmTone {
+        AlarmTone.find(id: alarm.toneIdentifier)
+    }
 
     var body: some View {
         NavigationStack {
@@ -19,6 +27,18 @@ struct SetAlarmView: View {
 
                 Section("Repeat") {
                     DayPicker(selectedDays: $alarm.repeatDays)
+                }
+
+                Section("Sound") {
+                    NavigationLink {
+                        TonePickerView(selectedId: $alarm.toneIdentifier)
+                    } label: {
+                        HStack {
+                            Text(selectedTone.emoji)
+                            Text(selectedTone.displayName)
+                            Spacer()
+                        }
+                    }
                 }
 
                 Section("Dismissal") {
@@ -68,7 +88,9 @@ struct SetAlarmView: View {
                 if !isNew {
                     Section {
                         Button("Delete alarm", role: .destructive) {
+                            let id = alarm.id
                             context.delete(alarm)
+                            Task { await supabase.deleteAlarm(id: id) }
                             dismiss()
                         }
                     }
@@ -78,12 +100,19 @@ struct SetAlarmView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        previewPlayer.stop()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        previewPlayer.stop()
                         if isNew { context.insert(alarm) }
-                        Task { try? await AlarmService.shared.schedule(alarm) }
+                        Task {
+                            try? await AlarmService.shared.schedule(alarm)
+                            await supabase.upsertAlarm(alarm)
+                        }
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -109,6 +138,59 @@ struct SetAlarmView: View {
             alarm.hour = alarm.isAM ? h : h - 12
             alarm.minute = comps.minute ?? 0
         }
+    }
+}
+
+// MARK: - Tone picker
+
+struct TonePickerView: View {
+    @Binding var selectedId: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var player = TonePreviewPlayer.shared
+
+    var body: some View {
+        List {
+            ForEach(AlarmTone.all) { tone in
+                Button {
+                    selectedId = tone.id
+                    player.preview(tone)
+                } label: {
+                    HStack(spacing: 14) {
+                        Text(tone.emoji)
+                            .font(.system(size: 22))
+                            .frame(width: 36)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tone.displayName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                            Text(tone.description)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if player.playingId == tone.id {
+                            // Animated speaker while playing
+                            Image(systemName: "speaker.wave.2.fill")
+                                .foregroundStyle(DesignSystem.royalBlue)
+                                .symbolEffect(.variableColor)
+                        } else if selectedId == tone.id {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(DesignSystem.royalBlue)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .navigationTitle("Alarm Sound")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear { player.stop() }
     }
 }
 

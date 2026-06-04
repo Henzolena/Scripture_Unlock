@@ -21,19 +21,11 @@ struct BibleAudioPlayerBar: View {
                 // ── Top row ──────────────────────────────────────────────────
                 HStack(spacing: 0) {
 
-                    // Title + source
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(audio.displayTitle.isEmpty ? "Holy Bible" : audio.displayTitle)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DesignSystem.ink)
-                            .lineLimit(1)
-                        if !audio.sourceName.isEmpty {
-                            Text(audio.sourceName)
-                                .font(.system(size: 10))
-                                .foregroundStyle(DesignSystem.slate400)
-                                .lineLimit(1)
-                        }
-                    }
+                    // Title
+                    Text(audio.displayTitle.isEmpty ? "Holy Bible" : audio.displayTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DesignSystem.ink)
+                        .lineLimit(1)
 
                     Spacer()
 

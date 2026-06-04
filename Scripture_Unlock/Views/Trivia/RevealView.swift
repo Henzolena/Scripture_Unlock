@@ -10,12 +10,20 @@ struct RevealView: View {
     @Query private var profiles: [UserProfile]
 
     @State private var parallelText: String? = nil
+    /// Lazily fetched when `question.verseText` is empty (Railway-sourced questions).
+    @State private var fetchedVerseText: String? = nil
 
     private var parallelLanguage: String {
         profiles.first?.parallelLanguage ?? ""
     }
     private var langInfo: EthiopianBibleService.LanguageInfo? {
         EthiopianBibleService.info(for: parallelLanguage)
+    }
+
+    /// The best available verse text: stored > fetched > placeholder.
+    private var displayVerseText: String {
+        if !question.verseText.isEmpty { return question.verseText }
+        return fetchedVerseText ?? "Loading verse…"
     }
 
     var body: some View {
@@ -97,9 +105,16 @@ struct RevealView: View {
             .padding(.bottom, 32)
         }
         .task {
-            if !parallelLanguage.isEmpty {
-                parallelText = await EthiopianBibleService.shared.verse(ref: question.verseRef, language: parallelLanguage)
-            }
+            async let parallel: String? = parallelLanguage.isEmpty
+                ? nil
+                : EthiopianBibleService.shared.verse(ref: question.verseRef, language: parallelLanguage)
+            async let english: String? = question.verseText.isEmpty
+                ? EthiopianBibleService.shared.verse(ref: question.verseRef, language: "en")
+                : nil
+
+            let (p, e) = await (parallel, english)
+            parallelText    = p
+            fetchedVerseText = e
         }
     }
 
@@ -112,8 +127,8 @@ struct RevealView: View {
                 .font(.system(size: 10, weight: .bold)).tracking(2)
                 .foregroundStyle(DesignSystem.pastoralGold)
 
-            // English text
-            Text("\u{201C}\(question.verseText)\u{201D}")
+            // English text — Railway-sourced questions fetch it lazily
+            Text("\u{201C}\(displayVerseText)\u{201D}")
                 .font(DesignSystem.serif(14, italic: true))
                 .foregroundStyle(DesignSystem.slate600)
                 .fixedSize(horizontal: false, vertical: true)

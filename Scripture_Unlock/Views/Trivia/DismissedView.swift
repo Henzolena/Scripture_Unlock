@@ -7,6 +7,8 @@ struct DismissedView: View {
     @Query private var streaks: [StreakEntry]
     @Environment(\.modelContext) private var context
     @State private var showReadChapter = false
+    @State private var votd:        VerseOfDay? = nil
+    @State private var votdPlayer   = VersOfDayAudioPlayer()
 
     private var currentStreak: Int {
         var count = 0
@@ -66,20 +68,64 @@ struct DismissedView: View {
                         .frame(height: 40)
                         .offset(y: 10)
 
-                    Text("O Lord, in the morning you hear my voice; in the morning I prepare a sacrifice for you and watch.")
+                    Text(votd?.text ?? "O Lord, in the morning you hear my voice; in the morning I prepare a sacrifice for you and watch.")
                         .font(DesignSystem.serif(24, italic: true))
                         .foregroundStyle(.white.opacity(0.95))
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 8) {
                         GoldRule(width: 18)
-                        Text("Psalm 5:3 · ESV")
+                        Text("\(votd?.ref ?? "Psalm 5:3") · \(votd?.translation ?? "NIV")")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(DesignSystem.pastoralGold)
+                        Spacer()
+                        if let status = votd?.audioStatus, status != "failed" {
+                            Button {
+                                if status == "ready", let url = votd?.audioURL {
+                                    if !votdPlayer.isPlaying { votdPlayer.load(url: url) }
+                                    votdPlayer.togglePlayPause()
+                                } else {
+                                    votdPlayer.requestAndPlay { fresh in votd = fresh }
+                                }
+                            } label: {
+                                if votdPlayer.isGenerating {
+                                    HStack(spacing: 6) {
+                                        ProgressView().scaleEffect(0.7).tint(DesignSystem.pastoralGold)
+                                        Text("Generating…")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(DesignSystem.pastoralGold)
+                                    }
+                                } else if status == "ready" {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: votdPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                            .font(.system(size: 20))
+                                        Text(votdPlayer.isPlaying ? "Pause" : "Listen")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .foregroundStyle(DesignSystem.pastoralGold)
+                                } else {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "play.circle")
+                                            .font(.system(size: 20))
+                                        Text("Generate audio")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .foregroundStyle(.white.opacity(0.5))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(votdPlayer.isGenerating)
+                        }
                     }
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
+                .task {
+                    votd = await VerseOfDayService.shared.today()
+                    if let url = votd?.audioURL {
+                        votdPlayer.load(url: url)
+                    }
+                }
 
                 Spacer()
 

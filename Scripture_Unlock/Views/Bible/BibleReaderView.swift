@@ -52,12 +52,41 @@ struct BibleReaderView: View {
         .sheet(item: $practiceTarget) { target in
             VerseQuizSheet(target: target)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
         }
         .background(DesignSystem.warmCream)
         .navigationTitle("\(book.englishName) \(chapter)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    practiceTarget = PracticeTarget(
+                        book:     book,
+                        chapter:  chapter,
+                        language: language
+                    )
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "graduationcap.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Quiz")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color(hex: "1E3A5F"), Color(hex: "2563EB")],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                    )
+                }
+            }
+        }
         .task {
             // Load verse text and audio in parallel.
             // Audio will keep playing even after navigating away from this view.
@@ -80,16 +109,9 @@ struct BibleReaderView: View {
             chapterHeader
             ForEach(verses, id: \.verse) { verse in
                 VerseRow(
-                    verse:     verse,
-                    isCopied:  copiedVerse == verse.verse,
-                    onCopy:    { copyVerse(verse) },
-                    onPractice: {
-                        practiceTarget = PracticeTarget(
-                            verse:    verse,
-                            book:     book,
-                            language: language
-                        )
-                    }
+                    verse:    verse,
+                    isCopied: copiedVerse == verse.verse,
+                    onCopy:   { copyVerse(verse) }
                 )
             }
         }
@@ -216,43 +238,27 @@ struct BibleReaderView: View {
 // MARK: - Verse row
 
 private struct VerseRow: View {
-    let verse:       EthiopianVerse
-    let isCopied:    Bool
-    let onCopy:      () -> Void
-    let onPractice:  () -> Void
-
-    @State private var showActions = false
+    let verse:    EthiopianVerse
+    let isCopied: Bool
+    let onCopy:   () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 10) {
-                // Verse number
-                Text("\(verse.verse)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DesignSystem.pastoralGold)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(minWidth: 32, alignment: .trailing)
-                    .padding(.top, 5)
+        HStack(alignment: .top, spacing: 10) {
+            // Verse number
+            Text("\(verse.verse)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(DesignSystem.pastoralGold)
+                .monospacedDigit()
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 32, alignment: .trailing)
+                .padding(.top, 5)
 
-                // Verse text
-                Text(verse.text)
-                    .font(DesignSystem.serif(19))
-                    .foregroundStyle(DesignSystem.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Practice button — always visible, subtle gold brain icon
-                Button(action: onPractice) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(DesignSystem.pastoralGold.opacity(0.65))
-                        .frame(width: 28, height: 28)
-                        .background(DesignSystem.pastoralGold.opacity(0.09))
-                        .clipShape(Circle())
-                }
-                .padding(.top, 2)
-            }
+            // Verse text
+            Text(verse.text)
+                .font(DesignSystem.serif(19))
+                .foregroundStyle(DesignSystem.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)

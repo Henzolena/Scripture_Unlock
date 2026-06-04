@@ -36,8 +36,13 @@ final class TriviaViewModel {
     private(set) var lastMissedQuestion: TriviaQuestion?
     private(set) var totalSteps: Int = 3
     private(set) var completedSteps: Int = 0
+    /// Total attempts including wrong answers (for accuracy tracking).
+    private(set) var totalAttempts: Int = 0
+    /// True while waiting for the AI question cache to populate.
+    private(set) var isGeneratingQuestions: Bool = false
 
     private var shownIds: Set<String> = []
+    private var questionPollingTask: Task<Void, Never>?
 
     var fillPickedIndex: Int? = nil
 
@@ -71,6 +76,7 @@ final class TriviaViewModel {
         shownIds = []
         lastMissedQuestion = nil
         completedSteps = 0
+        totalAttempts  = 0
         translatedFills = [:]
         loadQuestion(forStep: 0)
         phase = .question(step: 0)
@@ -135,6 +141,7 @@ final class TriviaViewModel {
     private func handleCorrect(step: Int) {
         triviaService.markSeen(currentQuestion!)
         completedSteps += 1
+        totalAttempts  += 1
         fillPickedIndex = nil
         phase = .correctMoment(step: step)
     }
@@ -144,6 +151,7 @@ final class TriviaViewModel {
         shownIds.insert(missed.id)
         lastMissedQuestion = missed
         fillPickedIndex = nil
+        totalAttempts += 1   // wrong attempt still counts
 
         let replacement = triviaService.replacementQuestion(
             after: missed,
@@ -167,8 +175,40 @@ final class TriviaViewModel {
         )
         currentQuestion = q
         if let q {
+            isGeneratingQuestions = false
             shownIds.insert(q.id)
             prefetchTranslation(for: q)
+        } else {
+            // Cache empty — generation is running in background; poll until a question arrives.
+            startPollingForQuestion(step: step)
+        }
+    }
+
+    /// Polls the trivia cache every 2 seconds until a question is available.
+    /// Stops automatically once a question loads or the phase changes.
+    private func startPollingForQuestion(step: Int) {
+        isGeneratingQuestions = true
+        questionPollingTask?.cancel()
+        questionPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 s
+                guard let self, case .question = self.phase else { return }
+                await MainActor.run {
+                    let q = self.triviaService.question(
+                        forStep: step,
+                        packId: self.alarm.packId,
+                        difficulty: self.alarm.difficulty,
+                        excluding: self.shownIds
+                    )
+                    if let q {
+                        self.currentQuestion = q
+                        self.isGeneratingQuestions = false
+                        self.shownIds.insert(q.id)
+                        self.prefetchTranslation(for: q)
+                        self.questionPollingTask?.cancel()
+                    }
+                }
+            }
         }
     }
 
