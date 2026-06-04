@@ -50,7 +50,8 @@ struct BibleView: View {
                 }
                 .navigationDestination(for: BibleChapterNav.self) { nav in
                     BibleReaderView(book: nav.book, chapter: nav.chapter,
-                                    language: selectedLanguage)
+                                    language: selectedLanguage,
+                                    highlightVerse: nav.verse)
                 }
             }
             .onChange(of: router.bibleDeepLink) { _, link in
@@ -146,7 +147,7 @@ struct BibleView: View {
             // Reset path then push book → chapter in one operation.
             navPath = NavigationPath()
             navPath.append(book)
-            navPath.append(BibleChapterNav(book: book, chapter: link.chapter))
+            navPath.append(BibleChapterNav(book: book, chapter: link.chapter, verse: link.verse))
 
             router.bibleDeepLink = nil
         }

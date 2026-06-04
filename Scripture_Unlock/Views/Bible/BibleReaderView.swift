@@ -6,9 +6,11 @@ import AVFoundation
 /// keeps playing when the user navigates back to the book list.
 struct BibleReaderView: View {
 
-    let book:     BibleBook
-    let chapter:  Int
-    let language: String
+    let book:           BibleBook
+    let chapter:        Int
+    let language:       String
+    /// When set, the reader scrolls to this verse number and briefly highlights it.
+    var highlightVerse: Int? = nil
 
     // MARK: - State
 
@@ -18,6 +20,8 @@ struct BibleReaderView: View {
     @State private var copiedVerse:     Int? = nil
     @State private var showCopiedBanner = false
     @State private var practiceTarget:  PracticeTarget? = nil
+    /// The verse currently glowing — set after load, cleared after animation.
+    @State private var glowingVerse:    Int? = nil
 
     /// Shared player — owned by BibleView, injected via .environment(audioPlayer).
     @Environment(BibleAudioPlayer.self) private var audio
@@ -26,19 +30,37 @@ struct BibleReaderView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView {
-                if isLoading {
-                    placeholderRows.padding(20)
-                } else if let ch = bibleChapter, !ch.verses.isEmpty {
-                    verseList(ch.verses)
-                        .padding(20)
-                        // Extra bottom padding so last verse clears the persistent audio bar
-                        .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
-                } else {
-                    errorView
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if isLoading {
+                        placeholderRows.padding(20)
+                    } else if let ch = bibleChapter, !ch.verses.isEmpty {
+                        verseList(ch.verses)
+                            .padding(20)
+                            .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
+                    } else {
+                        errorView
+                    }
+                }
+                .background(DesignSystem.warmCream)
+                // After chapter loads, scroll to the target verse and trigger the glow
+                .onChange(of: bibleChapter) { _, ch in
+                    guard let target = highlightVerse, ch != nil else { return }
+                    Task { @MainActor in
+                        // Brief wait for layout to complete before scrolling
+                        try? await Task.sleep(for: .milliseconds(300))
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            proxy.scrollTo(target, anchor: .center)
+                        }
+                        // Delay glow slightly so the scroll settles first
+                        try? await Task.sleep(for: .milliseconds(400))
+                        withAnimation(.easeIn(duration: 0.35)) { glowingVerse = target }
+                        // Hold the highlight for 2.5 seconds then fade out
+                        try? await Task.sleep(for: .seconds(2.5))
+                        withAnimation(.easeOut(duration: 0.6)) { glowingVerse = nil }
+                    }
                 }
             }
-            .background(DesignSystem.warmCream)
 
             // ── Copy confirmation banner ─────────────────────────────────────
             if showCopiedBanner {
@@ -109,10 +131,12 @@ struct BibleReaderView: View {
             chapterHeader
             ForEach(verses, id: \.verse) { verse in
                 VerseRow(
-                    verse:    verse,
-                    isCopied: copiedVerse == verse.verse,
-                    onCopy:   { copyVerse(verse) }
+                    verse:         verse,
+                    isCopied:      copiedVerse == verse.verse,
+                    isHighlighted: glowingVerse == verse.verse,
+                    onCopy:        { copyVerse(verse) }
                 )
+                .id(verse.verse)   // anchor for ScrollViewReader.scrollTo
             }
         }
     }
@@ -238,25 +262,28 @@ struct BibleReaderView: View {
 // MARK: - Verse row
 
 private struct VerseRow: View {
-    let verse:    EthiopianVerse
-    let isCopied: Bool
-    let onCopy:   () -> Void
+    let verse:         EthiopianVerse
+    let isCopied:      Bool
+    var isHighlighted: Bool = false
+    let onCopy:        () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            // Verse number
+            // Verse number — brighter gold when highlighted
             Text("\(verse.verse)")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(DesignSystem.pastoralGold)
+                .foregroundStyle(isHighlighted
+                    ? DesignSystem.pastoralGold
+                    : DesignSystem.pastoralGold.opacity(0.7))
                 .monospacedDigit()
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 32, alignment: .trailing)
                 .padding(.top, 5)
 
-            // Verse text
+            // Verse text — slightly bolder when highlighted
             Text(verse.text)
                 .font(DesignSystem.serif(19))
-                .foregroundStyle(DesignSystem.ink)
+                .foregroundStyle(isHighlighted ? DesignSystem.ink : DesignSystem.ink.opacity(0.88))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -264,10 +291,24 @@ private struct VerseRow: View {
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isCopied ? DesignSystem.pastoralGold.opacity(0.08) : Color.clear)
+                .fill(
+                    isHighlighted
+                        ? DesignSystem.pastoralGold.opacity(0.14)
+                        : isCopied
+                            ? DesignSystem.pastoralGold.opacity(0.08)
+                            : Color.clear
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isHighlighted
+                    ? DesignSystem.pastoralGold.opacity(0.45)
+                    : Color.clear,
+                    lineWidth: 1.5)
         )
         .contentShape(Rectangle())
         .onLongPressGesture(minimumDuration: 0.4) { onCopy() }
-        .animation(.easeInOut(duration: 0.2), value: isCopied)
+        .animation(.easeInOut(duration: 0.35), value: isHighlighted)
+        .animation(.easeInOut(duration: 0.2),  value: isCopied)
     }
 }

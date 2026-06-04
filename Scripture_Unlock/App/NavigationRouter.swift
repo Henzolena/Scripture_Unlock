@@ -28,4 +28,6 @@ struct BibleDeepLink: Equatable {
 struct BibleChapterNav: Hashable {
     let book:    BibleBook
     let chapter: Int
+    /// When non-nil the reader will scroll to + highlight this verse number.
+    let verse:   Int?
 }

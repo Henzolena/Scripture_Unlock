@@ -23,7 +23,7 @@ struct BibleChapterGridView: View {
                 // conflicts can't steal the tap
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(1...book.chapterCount, id: \.self) { chapter in
-                        NavigationLink(value: BibleChapterNav(book: book, chapter: chapter)) {
+                        NavigationLink(value: BibleChapterNav(book: book, chapter: chapter, verse: nil)) {
                             ChapterCell(number: chapter)
                         }
                         .buttonStyle(ChapterCellButtonStyle())
