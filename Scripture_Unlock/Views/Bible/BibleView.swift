@@ -14,9 +14,11 @@ struct BibleView: View {
     // MARK: - State
 
     @Query private var profiles: [UserProfile]
+    @Environment(NavigationRouter.self) private var router
     @State private var selectedLanguage: String = "am"
     @State private var books: [BibleBook] = []
     @State private var isLoading = false
+    @State private var navPath  = NavigationPath()
 
     /// Shared player — lives here so audio outlives any individual child view.
     @State private var audioPlayer = BibleAudioPlayer()
@@ -27,7 +29,7 @@ struct BibleView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            NavigationStack {
+            NavigationStack(path: $navPath) {
                 BibleBookListView(
                     books: books,
                     language: selectedLanguage,
@@ -41,6 +43,19 @@ struct BibleView: View {
                     }
                 }
                 .background(DesignSystem.warmCream)
+                // Centralised destinations — registered at stack root so
+                // they are always active, even when pushed programmatically.
+                .navigationDestination(for: BibleBook.self) { book in
+                    BibleChapterGridView(book: book, language: selectedLanguage)
+                }
+                .navigationDestination(for: BibleChapterNav.self) { nav in
+                    BibleReaderView(book: nav.book, chapter: nav.chapter,
+                                    language: selectedLanguage)
+                }
+            }
+            .onChange(of: router.bibleDeepLink) { _, link in
+                guard let link else { return }
+                handleDeepLink(link)
             }
 
             // ── Persistent audio bar — visible on any screen in the Bible tab ──
@@ -106,6 +121,35 @@ struct BibleView: View {
         if selectedLanguage == "niv" { return "English (NIV)" }
         return EthiopianBibleService.languages
             .first { $0.code == selectedLanguage }?.nativeName ?? selectedLanguage
+    }
+
+    // MARK: - Deep-link
+
+    /// Navigates to a specific book + chapter when "Go to verse" is tapped.
+    /// Switches the Bible language to NIV, loads books if needed, then pushes
+    /// both a BibleBook and BibleChapterNav onto the navigation path so the
+    /// reader opens directly at the right chapter.
+    private func handleDeepLink(_ link: BibleDeepLink) {
+        // Always open NIV for VOTD deep-links
+        selectedLanguage = link.language.isEmpty ? "niv" : link.language
+
+        Task {
+            // Ensure books are loaded in the target language
+            if books.isEmpty || books.first?.language != selectedLanguage {
+                await loadBooks()
+            }
+            guard let book = books.first(where: {
+                $0.abbreviation.uppercased() == link.book.uppercased()
+            }) else { return }
+
+            // Reset path then push book → chapter so we land in BibleReaderView
+            navPath = NavigationPath()
+            navPath.append(book)
+            navPath.append(BibleChapterNav(book: book, chapter: link.chapter))
+
+            // Clear the deep-link so repeated taps work
+            router.bibleDeepLink = nil
+        }
     }
 
     // MARK: - Data

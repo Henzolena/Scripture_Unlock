@@ -40,9 +40,6 @@ struct BibleBookListView: View {
                 bookList
             }
         }
-        .navigationDestination(for: BibleBook.self) { book in
-            BibleChapterGridView(book: book, language: language)
-        }
         .background(DesignSystem.warmCream)
         .task(id: language) {
             if let cov = await EthiopianBibleService.shared.coverage(language: language) {

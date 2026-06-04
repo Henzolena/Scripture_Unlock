@@ -21,12 +21,14 @@ struct RootView: View {
         }
     }
 
+    @State private var router = NavigationRouter()
+
     var body: some View {
         Group {
             if profiles.isEmpty {
                 OnboardingFlow()
             } else {
-                MainTabView()
+                MainTabView(router: router)
                     .fullScreenCover(item: Binding(
                         get: { alarmService.activeAlarm },
                         set: { _ in }
@@ -36,6 +38,7 @@ struct RootView: View {
                     }
             }
         }
+        .environment(router)
         .preferredColorScheme(preferredColorScheme)
         // One-time startup: reschedule alarms + seed local data for new installs
         .task {
@@ -78,12 +81,12 @@ struct RootView: View {
 // MARK: - Main tab bar
 
 struct MainTabView: View {
-    @State private var selectedTab: Tab = .home
+    @Bindable var router: NavigationRouter
 
     enum Tab { case home, stats, packs, bible, settings }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $router.selectedTab) {
             HomeView()
                 .tabItem { Label("Alarms",   systemImage: "alarm.fill") }
                 .tag(Tab.home)

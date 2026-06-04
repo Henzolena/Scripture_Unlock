@@ -23,7 +23,7 @@ struct BibleChapterGridView: View {
                 // conflicts can't steal the tap
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(1...book.chapterCount, id: \.self) { chapter in
-                        NavigationLink(value: chapter) {
+                        NavigationLink(value: BibleChapterNav(book: book, chapter: chapter)) {
                             ChapterCell(number: chapter)
                         }
                         .buttonStyle(ChapterCellButtonStyle())
@@ -33,10 +33,7 @@ struct BibleChapterGridView: View {
                 .padding(.bottom, 40)
             }
         }
-        // Destination registered here — picked up by the parent NavigationStack
-        .navigationDestination(for: Int.self) { chapter in
-            BibleReaderView(book: book, chapter: chapter, language: language)
-        }
+        // Note: BibleChapterNav destination is registered in BibleView (stack root)
         .background(DesignSystem.warmCream)
         .navigationTitle(book.name)
         .navigationBarTitleDisplayMode(.large)

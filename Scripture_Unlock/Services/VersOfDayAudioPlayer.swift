@@ -44,14 +44,18 @@ final class VersOfDayAudioPlayer {
             }
         }
 
-        // Auto-reset isPlaying when clip finishes
+        // Auto-reset isPlaying when clip finishes.
+        // Wrap in Task @MainActor so @Observable property changes are
+        // guaranteed to run on the main actor and trigger SwiftUI updates.
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
         ) { [weak self] _ in
-            self?.isPlaying = false
-            self?.player?.seek(to: .zero)
+            Task { @MainActor [weak self] in
+                self?.isPlaying = false
+                self?.player?.seek(to: .zero)
+            }
         }
 
         configureAudioSession()

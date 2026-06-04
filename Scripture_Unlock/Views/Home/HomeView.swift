@@ -5,6 +5,7 @@ struct HomeView: View {
     @Environment(\.modelContext)       private var context
     @Environment(AlarmService.self)    private var alarmService
     @Environment(SupabaseService.self) private var supabase
+    @Environment(NavigationRouter.self) private var router
     @Query(sort: \Alarm.createdAt) private var alarms: [Alarm]
     @Query private var profiles: [UserProfile]
     @Query private var streaks: [StreakEntry]
@@ -61,6 +62,26 @@ struct HomeView: View {
                         } : nil
                     )
                     .padding(.horizontal, 20)
+                    .contextMenu {
+                        if let v = votd {
+                            Button {
+                                router.bibleDeepLink = BibleDeepLink(
+                                    book:     v.book,
+                                    bookName: v.ref.components(separatedBy: " ").dropLast().joined(separator: " "),
+                                    chapter:  v.chapter,
+                                    verse:    v.verse
+                                )
+                                router.selectedTab = .bible
+                            } label: {
+                                Label("Go to verse", systemImage: "book.pages")
+                            }
+                            Button {
+                                UIPasteboard.general.string = "\(v.ref) (NIV)\n\"\(v.text)\""
+                            } label: {
+                                Label("Copy verse", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
                     .task {
                         // Always re-fetch — never serve a cached verse/audio_url
                         votd = await VerseOfDayService.shared.today()
