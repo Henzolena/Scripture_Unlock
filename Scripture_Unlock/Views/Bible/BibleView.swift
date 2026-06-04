@@ -131,25 +131,23 @@ struct BibleView: View {
     /// reader opens directly at the right chapter.
     private func handleDeepLink(_ link: BibleDeepLink) {
         Task { @MainActor in
-            // Switch to NIV and always reload — ensures we have the right book list
-            // regardless of what language was selected before the deep-link fired.
-            selectedLanguage = "niv"
-            await loadBooks()
+            // Fetch NIV books directly — avoids the selectedLanguage onChange
+            // race that would start a second concurrent loadBooks() call.
+            let nivBooks = await EthiopianBibleService.shared.books(language: "niv")
 
-            guard let book = books.first(where: {
+            guard let book = nivBooks.first(where: {
                 $0.abbreviation.uppercased() == link.book.uppercased()
             }) else { return }
 
-            // Small yield so the NavigationStack has time to settle after
-            // the language/books state change before we push onto the path.
-            try? await Task.sleep(for: .milliseconds(150))
+            // Apply the loaded books and language together in one update.
+            books            = nivBooks
+            selectedLanguage = "niv"
 
-            // Reset to root then push book → chapter → lands directly in BibleReaderView
+            // Reset path then push book → chapter in one operation.
             navPath = NavigationPath()
             navPath.append(book)
             navPath.append(BibleChapterNav(book: book, chapter: link.chapter))
 
-            // Clear so repeated "Go to verse" taps work correctly
             router.bibleDeepLink = nil
         }
     }

@@ -65,13 +65,20 @@ struct HomeView: View {
                     .contextMenu {
                         if let v = votd {
                             Button {
-                                router.bibleDeepLink = BibleDeepLink(
+                                // Switch tab first so BibleView is visible and
+                                // its NavigationStack is ready, THEN fire the
+                                // deep link so onChange has a live view to act on.
+                                router.selectedTab = .bible
+                                let link = BibleDeepLink(
                                     book:     v.book,
                                     bookName: v.ref.components(separatedBy: " ").dropLast().joined(separator: " "),
                                     chapter:  v.chapter,
                                     verse:    v.verse
                                 )
-                                router.selectedTab = .bible
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(450))
+                                    router.bibleDeepLink = link
+                                }
                             } label: {
                                 Label("Go to verse", systemImage: "book.pages")
                             }
