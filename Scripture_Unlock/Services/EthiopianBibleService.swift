@@ -238,7 +238,7 @@ extension EthiopianBibleService {
 
 // MARK: - Response model
 
-struct EthiopianVerse: Decodable {
+struct EthiopianVerse: Decodable, Equatable {
     let book:      String   // abbreviation e.g. "JHN"
     let bookName:  String   // localized name e.g. "ዮሐንስ"
     let chapter:   Int
@@ -316,7 +316,7 @@ struct BibleBook: Decodable, Identifiable, Hashable {
 }
 
 /// A full chapter returned by GET /{lang}/books/{abbrev}/{chapter}
-struct BibleChapter: Decodable {
+struct BibleChapter: Decodable, Equatable {
     let book:       String          // book abbreviation
     let bookName:   String          // localized book name
     let chapter:    Int
