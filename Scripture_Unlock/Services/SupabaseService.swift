@@ -127,6 +127,12 @@ final class SupabaseService {
         // authStateChanges observer handles setting isSignedIn = false
     }
 
+    /// Exposes the current auth session so other services (e.g. VerseMasteryService)
+    /// can make authenticated Supabase REST calls without duplicating auth logic.
+    func currentSession() async throws -> Session {
+        try await auth.session
+    }
+
     // MARK: - Two-way sync (cloud → local SwiftData)
 
     @MainActor

@@ -6,16 +6,23 @@ struct PacksView: View {
     @Environment(\.modelContext) private var context
 
     private var profile: UserProfile? { profiles.first }
+    private var mastery: VerseMasteryService { .shared }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if let profile {
-                        let pack = VersePack.find(profile.activePackId)
-                        activePack(pack)
+                        let pack  = VersePack.find(profile.activePackId)
+                        let stats = mastery.stats(for: pack.id)
+                        activePack(pack, stats: stats)
                             .padding(.horizontal, 20)
                             .padding(.top, 16)
+
+                        // ── Daily practice card ──────────────────────────
+                        DailyPracticeCard(packId: pack.id)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 14)
                     }
 
                     SectionHeader(title: "All packs")
@@ -48,7 +55,7 @@ struct PacksView: View {
 
     // MARK: - Active pack hero card
 
-    private func activePack(_ pack: VersePack) -> some View {
+    private func activePack(_ pack: VersePack, stats: PackMasteryStats) -> some View {
         ZStack(alignment: .bottomLeading) {
             // Background
             LinearGradient(
@@ -91,18 +98,18 @@ struct PacksView: View {
                         .cornerRadius(8)
                 }
 
-                // Progress bar
+                // Real mastery progress
                 VStack(alignment: .leading, spacing: 6) {
-                    ProgressView(value: 0.34)
+                    ProgressView(value: stats.progressFraction)
                         .tint(DesignSystem.pastoralGold)
                         .background(.white.opacity(0.12))
                         .cornerRadius(2)
                     HStack {
-                        Text("142 learned")
+                        Text("\(stats.masteredCount) mastered · \(stats.inProgressCount) in progress")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.55))
                         Spacer()
-                        Text("270 remaining")
+                        Text("\(stats.remainingCount) remaining")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.55))
                     }
