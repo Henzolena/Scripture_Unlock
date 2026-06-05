@@ -10,6 +10,7 @@ struct QuizOption: Decodable, Identifiable {
 
 struct QuizQuestion: Decodable, Identifiable {
     let id:            Int
+    let groupId:       String?  // links same question across all 4 language translations
     let book:          String
     let bookName:      String
     let chapter:       Int
@@ -27,6 +28,7 @@ struct QuizQuestion: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, book, chapter, language, question, options, difficulty, source, explanation
+        case groupId       = "group_id"
         case bookName      = "book_name"
         case verseStart    = "verse_start"
         case verseEnd      = "verse_end"
@@ -351,6 +353,17 @@ final class QuizService {
                 hint:      "Try again in a moment."
             )
         }
+    }
+
+    // MARK: - Fetch translations of specific questions by group_id
+
+    /// Given group_ids from already-loaded questions, fetches the same questions
+    /// in a different language. Used by the language switcher in VerseQuizSheet.
+    func questionsByGroups(groupIds: [String], lang: String) async -> [QuizQuestion] {
+        guard !groupIds.isEmpty else { return [] }
+        let ids = groupIds.joined(separator: ",")
+        guard let url = URL(string: "\(baseURL)/by-groups?group_ids=\(ids)&lang=\(lang)") else { return [] }
+        return await _fetch(path: url.absoluteString) ?? []
     }
 
     // MARK: - Generate for ALL languages (EN + AM + OR + TI in one call)

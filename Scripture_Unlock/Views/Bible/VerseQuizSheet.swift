@@ -71,19 +71,44 @@ struct VerseQuizSheet: View {
             }
         }
         .task {
-            // Start in the same language the user is reading
             if quizLanguage.isEmpty { quizLanguage = target.language }
             await load()
         }
         .onChange(of: quizLanguage) {
-            // Re-load when the user switches language
-            phase         = .loading
-            currentIndex  = 0
-            selectedLabel = nil
-            isAnswered    = false
-            score         = 0
-            showFinished  = false
-            Task { await load() }
+            guard case .ready(let current) = phase else {
+                // Not yet loaded — just reload normally
+                phase = .loading; currentIndex = 0; selectedLabel = nil
+                isAnswered = false; score = 0; showFinished = false
+                Task { await load() }
+                return
+            }
+            // Questions already loaded — swap to translated versions of the same questions
+            let groupIds = current.compactMap { $0.groupId }
+            let newLang  = quizLanguage
+            if groupIds.isEmpty {
+                // No group_ids (old questions) — fall back to fresh load
+                phase = .loading; currentIndex = 0; selectedLabel = nil
+                isAnswered = false; score = 0; showFinished = false
+                Task { await load() }
+            } else {
+                Task {
+                    withAnimation { phase = .loading }
+                    let translated = await QuizService.shared.questionsByGroups(
+                        groupIds: groupIds, lang: newLang)
+                    withAnimation {
+                        if translated.isEmpty {
+                            // Language not generated yet — trigger full regeneration
+                            phase = .generating
+                        } else {
+                            // ✅ Same questions, different language — keep current index
+                            phase = .ready(translated)
+                        }
+                    }
+                    if case .generating = phase {
+                        await load()   // will generate all languages then re-fetch
+                    }
+                }
+            }
         }
     }
 
