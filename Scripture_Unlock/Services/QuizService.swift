@@ -353,6 +353,34 @@ final class QuizService {
         }
     }
 
+    // MARK: - Generate for ALL languages (EN + AM + OR + TI in one call)
+
+    /// Calls `POST /quiz/generate-all-languages` so every language version is
+    /// cached server-side after the first quiz request for a chapter.
+    /// Returns a dict of language → count, e.g. {"niv":5,"am":5,"or":4,"ti":5}.
+    func generateAllLanguages(
+        book:    String,
+        chapter: Int,
+        count:   Int = 5
+    ) async -> [String: Int] {
+        guard let url = URL(string: "\(baseURL)/generate-all-languages") else { return [:] }
+
+        var request        = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 180   // translation takes longer
+
+        struct Body: Encodable { let book: String; let chapter: Int; let count: Int; let save: Bool }
+        request.httpBody = try? JSONEncoder().encode(Body(book: book, chapter: chapter, count: count, save: true))
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [:] }
+            struct Resp: Decodable { let generated_per_language: [String: Int] }
+            return (try? JSONDecoder().decode(Resp.self, from: data))?.generated_per_language ?? [:]
+        } catch { return [:] }
+    }
+
     // MARK: - Submit answer
 
     func submitAnswer(questionId: Int, selected: String) async -> QuizAnswerResponse? {

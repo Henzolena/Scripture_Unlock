@@ -27,6 +27,18 @@ struct VerseQuizSheet: View {
     }
     @State private var phase: LoadPhase = .loading
 
+    // MARK: Quiz language
+    /// Starts at the language the user is currently reading in.
+    /// Picker lets them switch to any of the 4 stored languages.
+    @State private var quizLanguage: String = ""
+
+    private static let supportedLanguages: [(code: String, flag: String, label: String)] = [
+        ("niv", "🇺🇸", "NIV"),
+        ("am",  "🇪🇹", "አማ"),
+        ("or",  "🇪🇹", "Or"),
+        ("ti",  "🇪🇹", "Tig"),
+    ]
+
     // MARK: Quiz state
     @State private var currentIndex  = 0
     @State private var selectedLabel: String?
@@ -58,7 +70,21 @@ struct VerseQuizSheet: View {
                     .allowsHitTesting(false)
             }
         }
-        .task { await load() }
+        .task {
+            // Start in the same language the user is reading
+            if quizLanguage.isEmpty { quizLanguage = target.language }
+            await load()
+        }
+        .onChange(of: quizLanguage) {
+            // Re-load when the user switches language
+            phase         = .loading
+            currentIndex  = 0
+            selectedLabel = nil
+            isAnswered    = false
+            score         = 0
+            showFinished  = false
+            Task { await load() }
+        }
     }
 
     // MARK: - Header
@@ -117,6 +143,9 @@ struct VerseQuizSheet: View {
                     }
                 }
 
+                // Language switcher — always visible
+                languagePicker
+
                 // Progress bar — only during the quiz
                 if case .ready(let qs) = phase, !showFinished {
                     quizProgressBar(current: currentIndex, total: qs.count)
@@ -127,6 +156,39 @@ struct VerseQuizSheet: View {
             .padding(.bottom, 20)
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // Language picker strip
+    private var languagePicker: some View {
+        HStack(spacing: 6) {
+            ForEach(Self.supportedLanguages, id: \.code) { lang in
+                Button {
+                    guard lang.code != quizLanguage else { return }
+                    withAnimation(.spring(response: 0.3)) { quizLanguage = lang.code }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(lang.flag).font(.system(size: 11))
+                        Text(lang.label)
+                            .font(.system(size: 11, weight: quizLanguage == lang.code ? .bold : .regular))
+                    }
+                    .foregroundStyle(quizLanguage == lang.code ? DesignSystem.pastoralGold : .white.opacity(0.45))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(quizLanguage == lang.code
+                                ? DesignSystem.pastoralGold.opacity(0.18)
+                                : Color.white.opacity(0.06))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(quizLanguage == lang.code
+                                ? DesignSystem.pastoralGold.opacity(0.5)
+                                : Color.clear, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     // Animated linear progress bar
@@ -729,10 +791,11 @@ struct VerseQuizSheet: View {
 
     private func load() async {
         phase = .loading
+        let lang = quizLanguage.isEmpty ? target.language : quizLanguage
 
-        // 1. Try stored questions first (fast path — no Gemini needed)
+        // 1. Try stored questions first (instant — no AI call needed)
         let stored = await QuizService.shared.chapterQuestions(
-            lang:    target.language,
+            lang:    lang,
             book:    target.book.abbreviation,
             chapter: target.chapter
         )
@@ -741,14 +804,29 @@ struct VerseQuizSheet: View {
             return
         }
 
-        // 2. Nothing stored → generate with AI
+        // 2. Nothing stored → generate ALL languages at once (EN + AM + OR + TI)
         withAnimation { phase = .generating }
+        let counts = await QuizService.shared.generateAllLanguages(
+            book:    target.book.abbreviation,
+            chapter: target.chapter,
+            count:   5
+        )
+
+        // If all-language generation succeeded, fetch the requested language
+        if let cnt = counts[lang], cnt > 0 {
+            let qs = await QuizService.shared.chapterQuestions(
+                lang: lang, book: target.book.abbreviation, chapter: target.chapter)
+            withAnimation { phase = qs.isEmpty ? .failed(QuizAPIError(errorCode: "EMPTY_RESPONSE", message: "No questions generated.", hint: nil)) : .ready(qs) }
+            return
+        }
+
+        // Fallback: single-language generate if all-language endpoint failed
         let result = await QuizService.shared.generateQuestions(
             book:       target.book.abbreviation,
             chapter:    target.chapter,
             verseStart: 1,
             verseEnd:   30,
-            language:   target.language,
+            language:   lang,
             count:      5,
             save:       true
         )
