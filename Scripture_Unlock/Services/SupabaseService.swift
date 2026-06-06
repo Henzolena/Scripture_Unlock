@@ -4,6 +4,11 @@ import PostgREST  // PostgrestClient — already linked in target
 import AuthenticationServices
 import SwiftData
 
+enum EmailOTPVerificationResult: Equatable {
+    case newUser
+    case existingUser
+}
+
 // MARK: - SupabaseService
 //
 // Uses the official Supabase Swift SDK sub-modules (Auth + PostgREST, v2.x).
@@ -26,6 +31,7 @@ import SwiftData
 final class SupabaseService {
 
     static let shared = SupabaseService()
+    private static let supportedEmailOTPCodeLengths: Set<Int> = [6, 8]
 
     // MARK: - Observable state
 
@@ -117,6 +123,80 @@ final class SupabaseService {
                     syncStatus = "⚠️ Could not sign in: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    // MARK: - Email OTP sign in
+
+    func sendEmailOTP(to email: String) async throws {
+        let normalizedEmail = Self.normalizedEmail(email)
+        guard Self.isValidEmail(normalizedEmail) else {
+            throw SupabaseAuthFlowError.invalidEmail
+        }
+
+        await MainActor.run {
+            syncStatus = "Sending sign-in code..."
+        }
+
+        do {
+            try await auth.signInWithOTP(
+                email: normalizedEmail,
+                shouldCreateUser: true
+            )
+            await MainActor.run {
+                userEmail = normalizedEmail
+                syncStatus = "Code sent to \(normalizedEmail)"
+            }
+        } catch {
+            await MainActor.run {
+                syncStatus = "Could not send code: \(error.localizedDescription)"
+            }
+            throw error
+        }
+    }
+
+    @discardableResult
+    func verifyEmailOTP(email: String, token: String) async throws -> EmailOTPVerificationResult {
+        let normalizedEmail = Self.normalizedEmail(email)
+        let normalizedToken = token.filter(\.isNumber)
+
+        guard Self.isValidEmail(normalizedEmail) else {
+            throw SupabaseAuthFlowError.invalidEmail
+        }
+        guard Self.supportedEmailOTPCodeLengths.contains(normalizedToken.count) else {
+            throw SupabaseAuthFlowError.invalidCode
+        }
+
+        await MainActor.run {
+            syncStatus = "Verifying code..."
+        }
+
+        do {
+            let response = try await verifyEmailOTPWithSupportedTypes(
+                email: normalizedEmail,
+                token: normalizedToken
+            )
+
+            guard let session = response.session else {
+                throw SupabaseAuthFlowError.missingSession
+            }
+
+            let result: EmailOTPVerificationResult = Self.isLikelyNewUser(response.user) ? .newUser : .existingUser
+
+            await MainActor.run {
+                isSignedIn = true
+                userEmail = session.user.email ?? normalizedEmail
+                syncStatus = result == .newUser
+                    ? "Welcome to Scripture Unlock. Your account is ready."
+                    : "Signed in. Your progress will sync shortly."
+            }
+
+            return result
+        } catch {
+            await MainActor.run {
+                syncStatus = "Could not verify code: \(error.localizedDescription)"
+            }
+            throw error
         }
     }
 
@@ -339,6 +419,69 @@ final class SupabaseService {
             headers: ["apikey": anonKey, "Authorization": "Bearer \(token)"],
             logger:  nil
         )
+    }
+
+    private func verifyEmailOTPWithSupportedTypes(email: String, token: String) async throws -> AuthResponse {
+        var lastError: Error?
+        for type in [EmailOTPType.signup, .magiclink, .email] {
+            do {
+                return try await auth.verifyOTP(
+                    email: email,
+                    token: token,
+                    type: type
+                )
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? SupabaseAuthFlowError.invalidCode
+    }
+
+    private static func normalizedEmail(_ email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func isValidEmail(_ email: String) -> Bool {
+        let parts = email.split(separator: "@")
+        guard parts.count == 2,
+              let local = parts.first,
+              let domain = parts.last,
+              !local.isEmpty,
+              domain.contains("."),
+              !domain.hasPrefix("."),
+              !domain.hasSuffix(".") else {
+            return false
+        }
+        return true
+    }
+
+    private static func isLikelyNewUser(_ user: User) -> Bool {
+        let now = Date()
+        let createdAge = abs(now.timeIntervalSince(user.createdAt))
+        guard createdAge <= 10 * 60 else { return false }
+
+        if let lastSignInAt = user.lastSignInAt {
+            return abs(lastSignInAt.timeIntervalSince(user.createdAt)) <= 10 * 60
+        }
+
+        return true
+    }
+}
+
+private enum SupabaseAuthFlowError: LocalizedError {
+    case invalidEmail
+    case invalidCode
+    case missingSession
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail:
+            return "Enter a valid email address."
+        case .invalidCode:
+            return "Enter the full code from your email."
+        case .missingSession:
+            return "The code was accepted, but no session was returned."
+        }
     }
 }
 

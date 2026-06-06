@@ -39,6 +39,10 @@ struct VerseQuizSheet: View {
         ("ti",  "🇪🇹", "Tig"),
     ]
 
+    private static func quizLanguageCode(for readingLanguage: String) -> String {
+        readingLanguage == "en" ? "niv" : readingLanguage
+    }
+
     // MARK: Quiz state
     @State private var currentIndex  = 0
     @State private var selectedLabel: String?
@@ -71,7 +75,7 @@ struct VerseQuizSheet: View {
             }
         }
         .task {
-            if quizLanguage.isEmpty { quizLanguage = target.language }
+            if quizLanguage.isEmpty { quizLanguage = Self.quizLanguageCode(for: target.language) }
             await load()
         }
         .onChange(of: quizLanguage) {
@@ -125,16 +129,17 @@ struct VerseQuizSheet: View {
             VStack(spacing: 14) {
                 HStack(alignment: .center) {
                     // Close button
-                    Button { dismiss() } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.10))
-                                .frame(width: 38, height: 38)
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(Color.white.opacity(0.12))
+                            .cornerRadius(12)
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -437,26 +442,11 @@ struct VerseQuizSheet: View {
     // MARK: - Next / Finish button
 
     private func nextButton(isLast: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Text(isLast ? "See Results" : "Next Question")
-                    .font(.system(size: 16, weight: .bold))
-                Image(systemName: isLast ? "trophy.fill" : "arrow.right")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(LinearGradient(
-                        colors: [Color(hex: "1E3A5F"), Color(hex: "2563EB")],
-                        startPoint: .leading, endPoint: .trailing
-                    ))
-                    .shadow(color: Color(hex: "1E3A5F").opacity(0.35), radius: 12, x: 0, y: 6)
-            )
-        }
-        .buttonStyle(QuizScaleButtonStyle())
+        AppActionButton(
+            title: isLast ? "See Results" : "Next Question",
+            icon: isLast ? "trophy.fill" : "arrow.right",
+            action: action
+        )
     }
 
     // MARK: - Finished / Results screen
@@ -542,35 +532,17 @@ struct VerseQuizSheet: View {
                             showConfetti  = false
                         }
                     } label: {
-                        Label("Practice Again", systemImage: "arrow.counterclockwise")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .fill(DesignSystem.pastoralGold)
-                                    .shadow(color: DesignSystem.pastoralGold.opacity(0.4), radius: 12, x: 0, y: 6)
-                            )
+                        AppActionLabel(
+                            title: "Practice Again",
+                            icon: "arrow.counterclockwise",
+                            style: .gold
+                        )
                     }
-                    .buttonStyle(QuizScaleButtonStyle())
+                    .buttonStyle(.plain)
 
-                    Button { dismiss() } label: {
-                        Text("Close")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(DesignSystem.slate600)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .fill(DesignSystem.surface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 18)
-                                            .strokeBorder(DesignSystem.slate400.opacity(0.2), lineWidth: 1)
-                                    )
-                            )
+                    AppActionButton(title: "Close", style: .neutral) {
+                        dismiss()
                     }
-                    .buttonStyle(QuizScaleButtonStyle())
                 }
                 .padding(.top, 4)
 
@@ -824,7 +796,7 @@ struct VerseQuizSheet: View {
             book:    target.book.abbreviation,
             chapter: target.chapter
         )
-        if !stored.isEmpty {
+        if !stored.isEmpty, stored.allSatisfy({ $0.groupId != nil }) {
             withAnimation { phase = .ready(stored) }
             return
         }
@@ -845,39 +817,12 @@ struct VerseQuizSheet: View {
             return
         }
 
-        // Fallback: single-language generate if all-language endpoint failed
-        let result = await QuizService.shared.generateQuestions(
-            book:       target.book.abbreviation,
-            chapter:    target.chapter,
-            verseStart: 1,
-            verseEnd:   30,
-            language:   lang,
-            count:      5,
-            save:       true
-        )
-
         withAnimation {
-            switch result {
-            case .success(let qs) where !qs.isEmpty:
-                phase = .ready(qs)
-
-            case .success:
-                phase = .failed(QuizAPIError(
-                    errorCode: "EMPTY_RESPONSE",
-                    message:   "No questions could be generated for this chapter.",
-                    hint:      "Try a different chapter or come back later."
-                ))
-
-            case .apiError(let err):
-                phase = .failed(err)
-
-            case .networkError:
-                phase = .failed(QuizAPIError(
-                    errorCode: "GEMINI_NETWORK_ERROR",
-                    message:   "Couldn't reach the server. Check your internet connection.",
-                    hint:      nil
-                ))
-            }
+            phase = .failed(QuizAPIError(
+                errorCode: "MULTILINGUAL_GENERATION_FAILED",
+                message:   "No synced quiz set could be generated for this chapter.",
+                hint:      "Try again in a moment. The quiz needs one linked set so language switching stays on the same questions."
+            ))
         }
     }
 

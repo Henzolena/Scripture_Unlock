@@ -40,13 +40,10 @@ struct RootView: View {
         }
         .environment(router)
         .preferredColorScheme(preferredColorScheme)
-        // One-time startup: reschedule alarms + seed local data for new installs
+        // One-time startup: reschedule saved alarms for this device.
         .task {
             let savedAlarms = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
             await alarmService.rescheduleAll(savedAlarms)
-            if !supabase.isSignedIn {
-                SeedDataService.seedIfNeeded(context: context)
-            }
         }
         // Sync whenever sign-in state changes (also fires once on launch with
         // the initial value, which is fine — syncFromCloud guards against
@@ -83,30 +80,102 @@ struct RootView: View {
 struct MainTabView: View {
     @Bindable var router: NavigationRouter
 
-    enum Tab { case home, stats, packs, bible, settings }
+    enum Tab: Hashable { case home, stats, packs, community, bible, settings }
 
     var body: some View {
-        TabView(selection: $router.selectedTab) {
-            HomeView()
-                .tabItem { Label("Alarms",   systemImage: "alarm.fill") }
-                .tag(Tab.home)
+        ZStack(alignment: .bottom) {
+            ZStack {
+                tabPage(.home) { HomeView() }
+                tabPage(.stats) { StatsView() }
+                tabPage(.packs) { PacksView() }
+                tabPage(.community) { CommunityView() }
+                tabPage(.bible) { BibleView() }
+                tabPage(.settings) { SettingsView() }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 92)
+            }
 
-            StatsView()
-                .tabItem { Label("Streak",   systemImage: "flame.fill") }
-                .tag(Tab.stats)
-
-            PacksView()
-                .tabItem { Label("Verses",   systemImage: "book.fill") }
-                .tag(Tab.packs)
-
-            BibleView()
-                .tabItem { Label("Bible",    systemImage: "books.vertical.fill") }
-                .tag(Tab.bible)
-
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                .tag(Tab.settings)
+            AppBottomTabBar(selectedTab: Binding(
+                get: { router.selectedTab },
+                set: { router.selectedTab = $0 }
+            ))
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
         }
-        .tint(DesignSystem.deepBlue)
+        .background(DesignSystem.warmCream.ignoresSafeArea())
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    @ViewBuilder
+    private func tabPage<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .opacity(router.selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(router.selectedTab == tab)
+            .accessibilityHidden(router.selectedTab != tab)
+    }
+}
+
+private struct AppBottomTabBar: View {
+    @Binding var selectedTab: MainTabView.Tab
+
+    private let items: [TabItem] = [
+        .init(tab: .home, label: "Alarms", icon: "alarm.fill"),
+        .init(tab: .stats, label: "Streak", icon: "flame.fill"),
+        .init(tab: .packs, label: "Verses", icon: "book.fill"),
+        .init(tab: .community, label: "Friends", icon: "person.2.fill"),
+        .init(tab: .bible, label: "Bible", icon: "books.vertical.fill"),
+        .init(tab: .settings, label: "More", icon: "ellipsis")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(items) { item in
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        selectedTab = item.tab
+                    }
+                } label: {
+                    let isSelected = selectedTab == item.tab
+                    VStack(spacing: 5) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: item.tab == .settings ? 19 : 21, weight: .bold))
+                            .frame(height: 23)
+                        Text(item.label)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(isSelected ? DesignSystem.royalBlue : DesignSystem.slate700)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22)
+                            .fill(isSelected ? DesignSystem.royalBlue.opacity(0.16) : .clear)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.label)
+            }
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 30)
+                .fill(DesignSystem.surface.opacity(0.96))
+                .shadow(color: DesignSystem.shadow1, radius: 16, x: 0, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 30)
+                .stroke(DesignSystem.royalBlue.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private struct TabItem: Identifiable {
+        let tab: MainTabView.Tab
+        let label: String
+        let icon: String
+
+        var id: MainTabView.Tab { tab }
     }
 }

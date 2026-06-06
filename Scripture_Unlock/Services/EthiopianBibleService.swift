@@ -80,6 +80,27 @@ final class EthiopianBibleService {
         return await verse(book: bookNum, chapter: ch, verse: vs, language: language)?.text
     }
 
+    /// Fetch a verse or range using the API reference parser, e.g. "MRK 6:5-6".
+    func passage(ref: String, language: String) async -> String? {
+        guard !language.isEmpty else { return nil }
+        guard let encodedRef = ref.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)/\(language)/passage?ref=\(encodedRef)") else {
+            return nil
+        }
+
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let verses = try JSONDecoder().decode([EthiopianVerse].self, from: data)
+            return verses
+                .sorted { $0.verse < $1.verse }
+                .map { $0.text }
+                .joined(separator: " ")
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Book number lookup (OT + NT canonical order)
 
     private static let bookNumbers: [String: Int] = {

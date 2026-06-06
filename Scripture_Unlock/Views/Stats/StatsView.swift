@@ -98,7 +98,7 @@ struct StatsView: View {
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
-            .navigationTitle("Streak")
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 

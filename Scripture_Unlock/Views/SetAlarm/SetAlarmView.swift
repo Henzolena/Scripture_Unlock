@@ -100,13 +100,13 @@ struct SetAlarmView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    AppToolbarTextButton(title: "Cancel", style: .neutral) {
                         previewPlayer.stop()
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    AppToolbarTextButton(title: "Save") {
                         previewPlayer.stop()
                         if isNew { context.insert(alarm) }
                         Task {
@@ -115,8 +115,6 @@ struct SetAlarmView: View {
                         }
                         dismiss()
                     }
-                    .fontWeight(.semibold)
-                    .tint(DesignSystem.royalBlue)
                 }
             }
             .tint(DesignSystem.deepBlue)

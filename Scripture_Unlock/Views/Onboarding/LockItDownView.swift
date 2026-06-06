@@ -92,10 +92,9 @@ struct LockItDownView: View {
 
                 if let onContinue {
                     PrimaryButton(title: "Start setup", icon: "shield.fill", action: onContinue)
-                    Button("I'll do this later") { onContinue() }
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(DesignSystem.slate600)
-                        .frame(maxWidth: .infinity)
+                    AppActionButton(title: "I'll do this later", style: .neutral, size: .compact) {
+                        onContinue()
+                    }
                         .padding(.top, 10)
                         .padding(.bottom, 48)
                 } else {

@@ -35,12 +35,16 @@ struct BibleView: View {
                     language: selectedLanguage,
                     isLoading: isLoading
                 )
-                .navigationTitle("Holy Bible")
-                .navigationBarTitleDisplayMode(.large)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .top) {
+                    HStack {
+                        Spacer()
                         languageMenu
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                    .background(DesignSystem.warmCream)
                 }
                 .background(DesignSystem.warmCream)
                 // Centralised destinations — registered at stack root so

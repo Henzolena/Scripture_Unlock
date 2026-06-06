@@ -3,7 +3,6 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext)       private var context
-    @Environment(AlarmService.self)    private var alarmService
     @Environment(SupabaseService.self) private var supabase
     @Environment(NavigationRouter.self) private var router
     @Query(sort: \Alarm.createdAt) private var alarms: [Alarm]
@@ -53,38 +52,15 @@ struct HomeView: View {
                         audioStatus:  votd?.audioStatus,
                         isPlaying:    votdPlayer.isPlaying,
                         isGenerating: votdPlayer.isGenerating,
-                        onPlayAudio:  votd?.audioStatus != nil && votd?.audioStatus != "failed" ? {
-                            if votd?.audioStatus == "ready" {
-                                votdPlayer.togglePlayPause()
-                            } else {
-                                votdPlayer.requestAndPlay { fresh in votd = fresh }
-                            }
-                        } : nil
+                        onPlayAudio:  votd != nil && votd?.audioStatus != "failed" ? { playVerseAudio() } : nil
                     )
                     .padding(.horizontal, 20)
                     .contextMenu {
-                        if let v = votd {
-                            Button {
-                                // Switch tab first so BibleView is visible and
-                                // its NavigationStack is ready, THEN fire the
-                                // deep link so onChange has a live view to act on.
-                                router.selectedTab = .bible
-                                let link = BibleDeepLink(
-                                    book:     v.book,
-                                    bookName: v.ref.components(separatedBy: " ").dropLast().joined(separator: " "),
-                                    chapter:  v.chapter,
-                                    verse:    v.verse
-                                )
-                                Task {
-                                    try? await Task.sleep(for: .milliseconds(450))
-                                    router.bibleDeepLink = link
-                                }
-                            } label: {
+                        if votd != nil {
+                            Button(action: goToVerseOfDay) {
                                 Label("Go to verse", systemImage: "book.pages")
                             }
-                            Button {
-                                UIPasteboard.general.string = "\(v.ref) (NIV)\n\"\(v.text)\""
-                            } label: {
+                            Button(action: copyVerseOfDay) {
                                 Label("Copy verse", systemImage: "doc.on.doc")
                             }
                         }
@@ -110,34 +86,7 @@ struct HomeView: View {
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
-            .navigationTitle("Scripture Unlock")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    // Dev-only: fire alarm immediately to test the full trivia flow
-                    Button {
-                        let testAlarm = alarms.first ?? Alarm(label: "Test", hour: 6, minute: 0)
-                        alarmService.activeAlarm = testAlarm
-                        alarmService.startAlarmAudio()
-                    } label: {
-                        Image(systemName: "bell.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(DesignSystem.pastoralGold)
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingNewAlarm = true } label: {
-                        ZStack {
-                            Circle()
-                                .fill(DesignSystem.deepBlue)
-                                .frame(width: 32, height: 32)
-                            Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             // New alarm
             .sheet(isPresented: $showingNewAlarm) {
                 SetAlarmView(alarm: Alarm(), isNew: true)
@@ -354,6 +303,37 @@ struct HomeView: View {
     }
 
     // MARK: - Actions
+
+    private func playVerseAudio() {
+        guard votd?.audioStatus != "failed" else { return }
+        if votd?.audioStatus == "ready" {
+            votdPlayer.togglePlayPause()
+        } else {
+            votdPlayer.requestAndPlay { fresh in votd = fresh }
+        }
+    }
+
+    private func goToVerseOfDay() {
+        guard let v = votd else { return }
+        // Switch tab first so BibleView is visible and its NavigationStack is ready,
+        // then fire the deep link so onChange has a live view to act on.
+        router.selectedTab = .bible
+        let link = BibleDeepLink(
+            book:     v.book,
+            bookName: v.ref.components(separatedBy: " ").dropLast().joined(separator: " "),
+            chapter:  v.chapter,
+            verse:    v.verse
+        )
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            router.bibleDeepLink = link
+        }
+    }
+
+    private func copyVerseOfDay() {
+        guard let v = votd else { return }
+        UIPasteboard.general.string = "\(v.ref) (NIV)\n\"\(v.text)\""
+    }
 
     private func duplicateAlarm(_ original: Alarm) {
         let copy = Alarm()

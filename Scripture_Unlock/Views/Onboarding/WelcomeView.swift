@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WelcomeView: View {
     let onContinue: () -> Void
+    let onSignIn: () -> Void
 
     private let pillars = [
         ("lock.fill",            "No skipping",  "Three correct answers before the alarm stops."),
@@ -86,10 +87,15 @@ struct WelcomeView: View {
                 PrimaryButton(title: "Begin", icon: "chevron.right", style: .gold, action: onContinue)
                     .padding(.horizontal, 24)
 
-                Button("Already have an account? Sign in") {}
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.top, 10)
+                AppActionButton(
+                    title: "Sign in",
+                    icon: "person.crop.circle.badge.checkmark",
+                    style: .neutral,
+                    size: .compact,
+                    action: onSignIn
+                )
+                .padding(.horizontal, 24)
+                .padding(.top, 10)
                     .padding(.bottom, 48)
             }
         }

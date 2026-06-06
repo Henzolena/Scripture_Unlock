@@ -346,13 +346,6 @@ final class AlarmService: NSObject {
         }
     }
 
-    /// Dev/simulator: trigger the full trivia flow immediately.
-    func fireTestAlarm() {
-        let test = Alarm(label: "Test alarm", hour: 6, minute: 0)
-        activeAlarm = test
-        startAlarmAudio()
-    }
-
     // MARK: - Private helpers
 
     private func dayIdentifier(alarm: Alarm, day: Int) -> String {

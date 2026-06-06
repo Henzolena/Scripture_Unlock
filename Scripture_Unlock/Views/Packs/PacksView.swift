@@ -20,7 +20,13 @@ struct PacksView: View {
                             .padding(.top, 16)
 
                         // ── Daily practice card ──────────────────────────
-                        DailyPracticeCard(packId: pack.id)
+                        DailyPracticeCard(
+                            packId: pack.id,
+                            initialLanguage: profile.parallelLanguage.isEmpty ? "en" : profile.parallelLanguage,
+                            onLanguageChange: { language in
+                                profile.parallelLanguage = language == "en" ? "" : language
+                            }
+                        )
                             .padding(.horizontal, 20)
                             .padding(.top, 14)
                     }
@@ -49,7 +55,7 @@ struct PacksView: View {
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
-            .navigationTitle("Verse Packs")
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 

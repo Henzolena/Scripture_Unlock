@@ -4,6 +4,7 @@ import AuthenticationServices
 
 struct ProfileView: View {
     let profile: UserProfile
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(SupabaseService.self) private var supabase
     @Query(sort: \StreakEntry.date, order: .reverse) private var entries: [StreakEntry]
@@ -44,51 +45,52 @@ struct ProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
+            VStack(spacing: 18) {
+                actionRow
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
                 heroHeader
                 statsRow
                     .padding(.horizontal, 20)
-                    .padding(.top, 24)
                 syncSection
                     .padding(.horizontal, 20)
-                    .padding(.top, 24)
                 Spacer(minLength: 40)
             }
         }
         .background(DesignSystem.warmCream.ignoresSafeArea())
-        .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                // Manual sync button — pulls latest from Supabase immediately
-                if supabase.isSignedIn {
-                    Button {
-                        Task { await supabase.syncFromCloud(context: context) }
-                    } label: {
-                        if supabase.isSyncing {
-                            ProgressView().tint(DesignSystem.royalBlue)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(DesignSystem.royalBlue)
-                        }
-                    }
-                    .disabled(supabase.isSyncing)
-                }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 10) {
+            AppToolbarIconButton(systemName: "chevron.left", style: .neutral) {
+                dismiss()
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(editingName ? "Save" : "Edit") {
-                    if editingName {
-                        profile.name = draftName.trimmingCharacters(in: .whitespaces)
-                        Task { await supabase.upsertProfile(profile) }
-                    } else {
-                        draftName = profile.name
-                    }
-                    editingName.toggle()
+            .accessibilityLabel("Back")
+
+            if supabase.isSignedIn {
+                AppToolbarIconButton(
+                    systemName: "arrow.clockwise",
+                    disabled: supabase.isSyncing
+                ) {
+                    Task { await supabase.syncFromCloud(context: context) }
                 }
-                .fontWeight(.semibold)
-                .tint(DesignSystem.royalBlue)
+                .accessibilityLabel("Sync")
             }
+
+            Spacer()
+
+            AppToolbarTextButton(title: editingName ? "Save" : "Edit") {
+                if editingName {
+                    profile.name = draftName.trimmingCharacters(in: .whitespaces)
+                    Task { await supabase.upsertProfile(profile) }
+                } else {
+                    draftName = profile.name
+                }
+                editingName.toggle()
+            }
+            .accessibilityLabel(editingName ? "Save profile" : "Edit profile")
         }
     }
 
@@ -96,7 +98,6 @@ struct ProfileView: View {
 
     private var heroHeader: some View {
         VStack(spacing: 0) {
-            // Dark banner — avatar overlaps its bottom edge via overlay
             ZStack {
                 LinearGradient(
                     colors: [Color(hex: "0D1B3E"), Color(hex: "1E3A5F")],
@@ -107,16 +108,13 @@ struct ProfileView: View {
                     center: .topTrailing, startRadius: 0, endRadius: 260
                 )
             }
-            .frame(height: 140)
+            .frame(height: 108)
             .overlay(alignment: .bottom) {
-                // Circle center sits ON the banner's bottom edge; lower half hangs below
                 avatarCircle
             }
 
-            // Reserve space for the bottom half of the avatar (88 / 2 = 44)
-            Color.clear.frame(height: 44)
+            Color.clear.frame(height: 38)
 
-            // Name
             if editingName {
                 TextField("Your name", text: $draftName)
                     .font(.system(size: 22, weight: .bold))
@@ -129,21 +127,10 @@ struct ProfileView: View {
                     .foregroundStyle(DesignSystem.ink)
             }
 
-            // Sync badge
             syncBadge
                 .padding(.top, 6)
 
-            // Diagnostic status — shown until cloud sync succeeds
-            if !supabase.syncStatus.isEmpty {
-                Text(supabase.syncStatus)
-                    .font(.system(size: 11))
-                    .foregroundStyle(supabase.syncStatus.hasPrefix("✅") ? DesignSystem.bethanyGreen : DesignSystem.slate400)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 2)
-            }
-
-            Color.clear.frame(height: 20)
+            Color.clear.frame(height: 8)
         }
     }
 
@@ -151,10 +138,10 @@ struct ProfileView: View {
         ZStack {
             Circle()
                 .fill(DesignSystem.goldGradient)
-                .frame(width: 88, height: 88)
+                .frame(width: 82, height: 82)
                 .shadow(color: DesignSystem.pastoralGold.opacity(0.45), radius: 14)
             Text(initials.isEmpty ? "?" : initials)
-                .font(.system(size: 34, weight: .bold))
+                .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(Color(hex: "1E3A5F"))
         }
     }
@@ -165,8 +152,8 @@ struct ProfileView: View {
                 .fill(supabase.isSignedIn ? DesignSystem.bethanyGreen : DesignSystem.slate400)
                 .frame(width: 7, height: 7)
             Text(supabase.isSignedIn
-                 ? (supabase.userEmail.isEmpty ? "Synced" : "Synced · \(supabase.userEmail)")
-                 : "Local only — tap to back up")
+                 ? "Synced"
+                 : "Local only - tap to back up")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(DesignSystem.slate600)
                 .lineLimit(1)
@@ -229,7 +216,7 @@ struct ProfileView: View {
                     Text("Progress is backed up")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(DesignSystem.ink)
-                    Text("Your streak and settings are synced across all devices signed in with your Apple ID.")
+                    Text("Your streak and settings are synced across devices with this account.")
                         .font(.system(size: 12))
                         .foregroundStyle(DesignSystem.slate600)
                         .fixedSize(horizontal: false, vertical: true)
@@ -281,7 +268,7 @@ struct ProfileView: View {
                     Text("Back up your progress")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(DesignSystem.ink)
-                    Text("Sign in with Apple to sync your streak, alarms, and settings across all your devices — privately and securely.")
+                    Text("Sign in with Apple or email OTP to sync your streak, alarms, and settings across your devices.")
                         .font(.system(size: 12))
                         .foregroundStyle(DesignSystem.slate600)
                         .fixedSize(horizontal: false, vertical: true)
@@ -296,6 +283,14 @@ struct ProfileView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 52)
             .cornerRadius(13)
+
+            EmailOTPAuthView(
+                title: "Sign in with email",
+                subtitle: "Use a one-time code. No password or separate signup screen.",
+                showsContainer: false,
+                successActionTitle: nil,
+                onSuccess: nil
+            )
         }
         .padding(16)
         .background(DesignSystem.surface)

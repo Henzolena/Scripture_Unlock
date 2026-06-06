@@ -89,22 +89,12 @@ struct BibleReaderView: View {
                         language: language
                     )
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "graduationcap.fill")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Quiz")
-                            .font(.system(size: 13, weight: .bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(LinearGradient(
-                                colors: [Color(hex: "1E3A5F"), Color(hex: "2563EB")],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ))
+                    AppActionLabel(
+                        title: "Quiz",
+                        icon: "graduationcap.fill",
+                        style: .primary,
+                        size: .toolbar,
+                        fullWidth: false
                     )
                 }
             }

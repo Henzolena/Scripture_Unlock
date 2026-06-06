@@ -66,18 +66,32 @@ final class VerseMasteryService {
     /// lowest mastery first, never already practiced today.
     func todaysPracticeQuestion(packId: String,
                                 difficulty: Difficulty = .regular) -> TriviaQuestion? {
+        let notDoneToday = practiceQuestionsForToday(packId: packId, difficulty: difficulty, count: 1)
+        // Sort ascending by mastery — lowest = most in need of practice
+        return notDoneToday.first
+    }
+
+    func practiceQuestionsForToday(packId: String,
+                                   difficulty: Difficulty = .regular,
+                                   count: Int = 3) -> [TriviaQuestion] {
         let qs = QuestionGeneratorAgent.shared.questions(forPack: packId,
                                                          difficulty: difficulty)
-        guard !qs.isEmpty else { return nil }
+            .filter { $0.kind == .mcq && $0.options.count >= 2 }
+        guard !qs.isEmpty else { return [] }
 
         let today = todayStr()
-        let notDoneToday = qs.filter { q in
-            entries[key(packId, q.verseRef)]?.lastPracticed != today
-        }
-        // Sort ascending by mastery — lowest = most in need of practice
-        return (notDoneToday.isEmpty ? qs : notDoneToday)
-            .min { masteryLevel(packId: packId, verseRef: $0.verseRef)
-                 < masteryLevel(packId: packId, verseRef: $1.verseRef) }
+        return qs
+            .filter { q in entries[key(packId, q.verseRef)]?.lastPracticed != today }
+            .sorted { lhs, rhs in
+                let leftMastery = masteryLevel(packId: packId, verseRef: lhs.verseRef)
+                let rightMastery = masteryLevel(packId: packId, verseRef: rhs.verseRef)
+                if leftMastery == rightMastery {
+                    return lhs.verseRef < rhs.verseRef
+                }
+                return leftMastery < rightMastery
+            }
+            .prefix(count)
+            .map { $0 }
     }
 
     func isPracticedToday(packId: String, verseRef: String) -> Bool {

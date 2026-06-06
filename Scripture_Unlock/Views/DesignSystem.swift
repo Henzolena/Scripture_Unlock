@@ -48,6 +48,25 @@ enum DesignSystem {
         dark:  Color.black.opacity(0.22)
     )
 
+    // MARK: - Layout
+
+    static let controlRadius: CGFloat = 12
+    static let cardRadius: CGFloat = 16
+
+    // MARK: - UIKit bridge
+
+    static let uiDeepBlue = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(hex: "60A5FA") : UIColor(hex: "1E3A5F")
+    }
+
+    static let uiWarmCream = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(hex: "111827") : UIColor(hex: "FAF7F2")
+    }
+
+    static let uiSurface = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(hex: "1F2937") : UIColor(hex: "FFFFFF")
+    }
+
     // MARK: - Typography
 
     static let serifFont: Font = .custom("Georgia", size: 17)
@@ -85,19 +104,517 @@ extension Color {
     }
 }
 
+extension UIColor {
+    convenience init(hex: String) {
+        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&int)
+        let r = CGFloat((int >> 16) & 0xFF) / 255
+        let g = CGFloat((int >>  8) & 0xFF) / 255
+        let b = CGFloat( int        & 0xFF) / 255
+        self.init(red: r, green: g, blue: b, alpha: 1)
+    }
+}
+
 // MARK: - Shared view modifiers
 
 struct CardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(DesignSystem.surface)
-            .cornerRadius(16)
+            .cornerRadius(DesignSystem.cardRadius)
             .shadow(color: DesignSystem.shadow1, radius: 8, x: 0, y: 2)
     }
 }
 
 extension View {
     func cardStyle() -> some View { modifier(CardStyle()) }
+}
+
+// MARK: - AppAppearance
+
+enum AppAppearance {
+    static func configure() {
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithDefaultBackground()
+        navAppearance.backgroundColor = DesignSystem.uiWarmCream
+        navAppearance.shadowColor = UIColor.separator.withAlphaComponent(0.18)
+        navAppearance.largeTitleTextAttributes = [
+            .foregroundColor: DesignSystem.uiDeepBlue
+        ]
+        navAppearance.titleTextAttributes = [
+            .foregroundColor: DesignSystem.uiDeepBlue
+        ]
+
+        UINavigationBar.appearance().standardAppearance = navAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        UINavigationBar.appearance().compactAppearance = navAppearance
+        UINavigationBar.appearance().tintColor = DesignSystem.uiDeepBlue
+        UIBarButtonItem.appearance().tintColor = DesignSystem.uiDeepBlue
+
+        UITabBar.appearance().tintColor = DesignSystem.uiDeepBlue
+        UITabBar.appearance().unselectedItemTintColor = UIColor.secondaryLabel
+    }
+}
+
+// MARK: - Shared controls
+
+struct AppActionButton: View {
+    let title: String
+    var icon: String? = nil
+    var style: Style = .primary
+    var size: Size = .regular
+    var fullWidth = true
+    var disabled = false
+    let action: () -> Void
+
+    enum Style {
+        case primary, secondary, success, gold, neutral, destructive
+    }
+
+    enum Size {
+        case regular, compact, toolbar
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: iconSize, weight: .bold))
+                }
+                Text(title)
+                    .font(.system(size: textSize, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .foregroundStyle(foreground)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(height: height)
+            .padding(.horizontal, horizontalPadding)
+            .background(background)
+            .overlay(
+                RoundedRectangle(cornerRadius: radius)
+                    .stroke(border, lineWidth: borderWidth)
+            )
+            .cornerRadius(radius)
+            .contentShape(RoundedRectangle(cornerRadius: radius))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.65 : 1)
+    }
+
+    private var height: CGFloat {
+        switch size {
+        case .regular: return 52
+        case .compact: return 40
+        case .toolbar: return 34
+        }
+    }
+
+    private var horizontalPadding: CGFloat {
+        switch size {
+        case .regular: return 16
+        case .compact: return 12
+        case .toolbar: return 11
+        }
+    }
+
+    private var textSize: CGFloat {
+        switch size {
+        case .regular: return 15
+        case .compact: return 13
+        case .toolbar: return 13
+        }
+    }
+
+    private var iconSize: CGFloat {
+        switch size {
+        case .regular: return 15
+        case .compact: return 13
+        case .toolbar: return 12
+        }
+    }
+
+    private var radius: CGFloat {
+        size == .toolbar ? 17 : DesignSystem.controlRadius
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary, .success, .destructive:
+            return .white
+        case .gold:
+            return Color(hex: "1E3A5F")
+        case .secondary:
+            return DesignSystem.royalBlue
+        case .neutral:
+            return DesignSystem.slate700
+        }
+    }
+
+    private var background: AnyShapeStyle {
+        if disabled {
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.38))
+        }
+
+        switch style {
+        case .primary:
+            return AnyShapeStyle(DesignSystem.deepBlue)
+        case .secondary:
+            return AnyShapeStyle(DesignSystem.royalBlue.opacity(0.10))
+        case .success:
+            return AnyShapeStyle(DesignSystem.bethanyGreen)
+        case .gold:
+            return AnyShapeStyle(DesignSystem.goldGradient)
+        case .neutral:
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.14))
+        case .destructive:
+            return AnyShapeStyle(DesignSystem.danger)
+        }
+    }
+
+    private var border: Color {
+        switch style {
+        case .secondary:
+            return DesignSystem.royalBlue.opacity(disabled ? 0.0 : 0.16)
+        case .neutral:
+            return DesignSystem.slate400.opacity(disabled ? 0.0 : 0.18)
+        default:
+            return .clear
+        }
+    }
+
+    private var borderWidth: CGFloat {
+        switch style {
+        case .secondary, .neutral:
+            return disabled ? 0 : 1
+        default:
+            return 0
+        }
+    }
+}
+
+struct AppActionLabel: View {
+    let title: String
+    var icon: String? = nil
+    var style: AppActionButton.Style = .primary
+    var size: AppActionButton.Size = .regular
+    var fullWidth = true
+    var disabled = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: iconSize, weight: .bold))
+            }
+            Text(title)
+                .font(.system(size: textSize, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .foregroundStyle(foreground)
+        .frame(maxWidth: fullWidth ? .infinity : nil)
+        .frame(height: height)
+        .padding(.horizontal, horizontalPadding)
+        .background(background)
+        .overlay(
+            RoundedRectangle(cornerRadius: radius)
+                .stroke(border, lineWidth: borderWidth)
+        )
+        .cornerRadius(radius)
+        .opacity(disabled ? 0.65 : 1)
+    }
+
+    private var height: CGFloat {
+        switch size {
+        case .regular: return 52
+        case .compact: return 40
+        case .toolbar: return 34
+        }
+    }
+
+    private var horizontalPadding: CGFloat {
+        switch size {
+        case .regular: return 16
+        case .compact: return 12
+        case .toolbar: return 11
+        }
+    }
+
+    private var textSize: CGFloat {
+        switch size {
+        case .regular: return 15
+        case .compact: return 13
+        case .toolbar: return 13
+        }
+    }
+
+    private var iconSize: CGFloat {
+        switch size {
+        case .regular: return 15
+        case .compact: return 13
+        case .toolbar: return 12
+        }
+    }
+
+    private var radius: CGFloat {
+        size == .toolbar ? 17 : DesignSystem.controlRadius
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary, .success, .destructive:
+            return .white
+        case .gold:
+            return Color(hex: "1E3A5F")
+        case .secondary:
+            return DesignSystem.royalBlue
+        case .neutral:
+            return DesignSystem.slate700
+        }
+    }
+
+    private var background: AnyShapeStyle {
+        if disabled {
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.38))
+        }
+
+        switch style {
+        case .primary:
+            return AnyShapeStyle(DesignSystem.deepBlue)
+        case .secondary:
+            return AnyShapeStyle(DesignSystem.royalBlue.opacity(0.10))
+        case .success:
+            return AnyShapeStyle(DesignSystem.bethanyGreen)
+        case .gold:
+            return AnyShapeStyle(DesignSystem.goldGradient)
+        case .neutral:
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.14))
+        case .destructive:
+            return AnyShapeStyle(DesignSystem.danger)
+        }
+    }
+
+    private var border: Color {
+        switch style {
+        case .secondary:
+            return DesignSystem.royalBlue.opacity(disabled ? 0.0 : 0.16)
+        case .neutral:
+            return DesignSystem.slate400.opacity(disabled ? 0.0 : 0.18)
+        default:
+            return .clear
+        }
+    }
+
+    private var borderWidth: CGFloat {
+        switch style {
+        case .secondary, .neutral:
+            return disabled ? 0 : 1
+        default:
+            return 0
+        }
+    }
+}
+
+struct AppIconButton: View {
+    let systemName: String
+    var style: Style = .primary
+    var size: CGFloat = 40
+    var disabled = false
+    var action: () -> Void
+
+    enum Style {
+        case primary, secondary, success, neutral, destructive, gold
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: max(13, size * 0.38), weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: size, height: size)
+                .background(background)
+                .overlay(
+                    RoundedRectangle(cornerRadius: min(13, size * 0.31))
+                        .stroke(border, lineWidth: borderWidth)
+                )
+                .cornerRadius(min(13, size * 0.31))
+                .contentShape(RoundedRectangle(cornerRadius: min(13, size * 0.31)))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.65 : 1)
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary, .success, .destructive:
+            return .white
+        case .gold:
+            return Color(hex: "1E3A5F")
+        case .secondary:
+            return DesignSystem.royalBlue
+        case .neutral:
+            return DesignSystem.slate700
+        }
+    }
+
+    private var background: AnyShapeStyle {
+        if disabled {
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.32))
+        }
+
+        switch style {
+        case .primary:
+            return AnyShapeStyle(DesignSystem.deepBlue)
+        case .secondary:
+            return AnyShapeStyle(DesignSystem.royalBlue.opacity(0.10))
+        case .success:
+            return AnyShapeStyle(DesignSystem.bethanyGreen)
+        case .neutral:
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.14))
+        case .destructive:
+            return AnyShapeStyle(DesignSystem.danger)
+        case .gold:
+            return AnyShapeStyle(DesignSystem.goldGradient)
+        }
+    }
+
+    private var border: Color {
+        switch style {
+        case .secondary:
+            return DesignSystem.royalBlue.opacity(0.16)
+        case .neutral:
+            return DesignSystem.slate400.opacity(0.18)
+        default:
+            return .clear
+        }
+    }
+
+    private var borderWidth: CGFloat {
+        switch style {
+        case .secondary, .neutral:
+            return 1
+        default:
+            return 0
+        }
+    }
+}
+
+struct AppToolbarIconButton: View {
+    let systemName: String
+    var style: AppIconButton.Style = .secondary
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        AppIconButton(
+            systemName: systemName,
+            style: style,
+            size: 34,
+            disabled: disabled,
+            action: action
+        )
+    }
+}
+
+struct AppToolbarTextButton: View {
+    let title: String
+    var style: AppActionButton.Style = .secondary
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        AppActionButton(
+            title: title,
+            style: style,
+            size: .toolbar,
+            fullWidth: false,
+            disabled: disabled,
+            action: action
+        )
+    }
+}
+
+struct AppCloseButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        AppToolbarIconButton(systemName: "xmark", style: .neutral, action: action)
+            .accessibilityLabel("Close")
+    }
+}
+
+struct ToolbarIconLabel: View {
+    let systemName: String
+    var style: AppIconButton.Style = .secondary
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(foreground)
+            .frame(width: 34, height: 34)
+            .background(background)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(border, lineWidth: borderWidth)
+            )
+            .cornerRadius(10)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary, .success, .destructive:
+            return .white
+        case .gold:
+            return Color(hex: "1E3A5F")
+        case .secondary:
+            return DesignSystem.royalBlue
+        case .neutral:
+            return DesignSystem.slate700
+        }
+    }
+
+    private var background: AnyShapeStyle {
+        switch style {
+        case .primary:
+            return AnyShapeStyle(DesignSystem.deepBlue)
+        case .secondary:
+            return AnyShapeStyle(DesignSystem.royalBlue.opacity(0.10))
+        case .success:
+            return AnyShapeStyle(DesignSystem.bethanyGreen)
+        case .neutral:
+            return AnyShapeStyle(DesignSystem.slate400.opacity(0.14))
+        case .destructive:
+            return AnyShapeStyle(DesignSystem.danger)
+        case .gold:
+            return AnyShapeStyle(DesignSystem.goldGradient)
+        }
+    }
+
+    private var border: Color {
+        switch style {
+        case .secondary:
+            return DesignSystem.royalBlue.opacity(0.16)
+        case .neutral:
+            return DesignSystem.slate400.opacity(0.18)
+        default:
+            return .clear
+        }
+    }
+
+    private var borderWidth: CGFloat {
+        switch style {
+        case .secondary, .neutral:
+            return 1
+        default:
+            return 0
+        }
+    }
 }
 
 // MARK: - GoldRule
@@ -178,22 +695,13 @@ struct PrimaryButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 17, weight: .bold))
-                if let icon { Image(systemName: icon) }
-            }
-            .foregroundStyle(fg)
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(bg)
-            .cornerRadius(14)
-            .shadow(color: style == .gold
-                ? DesignSystem.pastoralGold.opacity(0.35)
-                : Color(hex: "1E3A5F").opacity(0.22),
-                    radius: 8, x: 0, y: 4)
-        }
+        AppActionButton(
+            title: title,
+            icon: icon,
+            style: style == .gold ? .gold : .primary,
+            size: .regular,
+            action: action
+        )
     }
 }
 
@@ -211,8 +719,19 @@ struct VerseCard: View {
     var onPlayAudio:  (() -> Void)? = nil
 
     private var showAudioButton: Bool {
-        guard let s = audioStatus else { return false }
-        return s != "failed"
+        audioStatus != "failed"
+    }
+
+    private var audioIcon: String {
+        if isGenerating { return "hourglass" }
+        if audioStatus == "ready" { return isPlaying ? "pause.fill" : "play.fill" }
+        return "waveform"
+    }
+
+    private var audioLabel: String {
+        if isGenerating { return "Generating" }
+        if audioStatus == "ready" { return isPlaying ? "Pause" : "Listen" }
+        return "Audio"
     }
 
     var body: some View {

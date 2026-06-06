@@ -118,6 +118,48 @@ private struct AnswerRequest: Encodable {
     }
 }
 
+struct PracticeTranslation: Decodable {
+    let language: String
+    let verseRef: String
+    let kind: String
+    let prompt: String
+    let options: [String]
+    let answerIndex: Int
+    let verseText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case language, kind, prompt, options
+        case verseRef = "verse_ref"
+        case answerIndex = "answer_index"
+        case verseText = "verse_text"
+    }
+}
+
+private struct PracticeTranslateRequest: Encodable {
+    let targetLanguage: String
+    let book: String
+    let bookName: String
+    let chapter: Int
+    let verse: Int
+    let verseRef: String
+    let kind: String
+    let prompt: String
+    let options: [String]
+    let answerIndex: Int
+    let fillPre: String?
+    let fillPost: String?
+
+    enum CodingKeys: String, CodingKey {
+        case book, chapter, verse, kind, prompt, options
+        case targetLanguage = "target_language"
+        case bookName = "book_name"
+        case verseRef = "verse_ref"
+        case answerIndex = "answer_index"
+        case fillPre = "fill_pre"
+        case fillPost = "fill_post"
+    }
+}
+
 /// Envelope for new structured errors: `{"detail": {object}}`.
 private struct APIErrorEnvelope: Decodable {
     let detail: QuizAPIError
@@ -364,6 +406,46 @@ final class QuizService {
         let ids = groupIds.joined(separator: ",")
         guard let url = URL(string: "\(baseURL)/by-groups?group_ids=\(ids)&lang=\(lang)") else { return [] }
         return await _fetch(path: url.absoluteString) ?? []
+    }
+
+    func translatePracticeQuestion(
+        question: TriviaQuestion,
+        targetLanguage: String,
+        book: String,
+        bookName: String,
+        chapter: Int,
+        verse: Int
+    ) async -> PracticeTranslation? {
+        guard let url = URL(string: "\(baseURL)/translate-practice") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 90
+
+        let body = PracticeTranslateRequest(
+            targetLanguage: targetLanguage,
+            book: book,
+            bookName: bookName,
+            chapter: chapter,
+            verse: verse,
+            verseRef: question.verseRef,
+            kind: question.kind.rawValue,
+            prompt: question.displayPrompt,
+            options: question.options,
+            answerIndex: question.answerIndex,
+            fillPre: question.fillPre,
+            fillPost: question.fillPost
+        )
+        request.httpBody = try? JSONEncoder().encode(body)
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(PracticeTranslation.self, from: data)
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Generate for ALL languages (EN + AM + OR + TI in one call)

@@ -18,6 +18,9 @@ DerivedData/
 # Swift Package Manager
 .build/
 
+# Supabase CLI local state
+supabase/.temp/
+
 # Gemini / other secret scratch files
 gemeni-key-secret.md
 *.key.md

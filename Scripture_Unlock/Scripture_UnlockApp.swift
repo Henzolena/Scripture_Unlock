@@ -16,6 +16,8 @@ struct Scripture_UnlockApp: App {
     @State private var supabaseService = SupabaseService.shared
 
     init() {
+        AppAppearance.configure()
+
         // Touch AlarmService early so UNUserNotificationCenter.delegate is
         // registered before the system delivers any pending responses.
         _ = AlarmService.shared
