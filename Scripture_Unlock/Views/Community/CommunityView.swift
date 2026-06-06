@@ -131,7 +131,7 @@ struct CommunityView: View {
 
                 ForEach(community.dashboard.outgoingRequests) { request in
                     HStack(spacing: 12) {
-                        AvatarCircle(name: request.name, size: 38)
+                        AvatarCircle(name: request.name, avatarPath: request.avatarPath, size: 38)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(request.name.isEmpty ? "Pending friend" : request.name)
                                 .font(.system(size: 14, weight: .semibold))
@@ -160,7 +160,7 @@ struct CommunityView: View {
                     HStack(spacing: 12) {
                         ForEach(community.dashboard.friends) { friend in
                             VStack(spacing: 8) {
-                                AvatarCircle(name: friend.name, size: 48)
+                                AvatarCircle(name: friend.name, avatarPath: friend.avatarPath, size: 48)
                                 Text(friend.name.isEmpty ? "Friend" : friend.name)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(DesignSystem.ink)
@@ -233,7 +233,7 @@ private struct FriendCodeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                AvatarCircle(name: profile.name, size: 48)
+                AvatarCircle(name: profile.name, avatarPath: profile.avatarPath, size: 48)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(profile.name.isEmpty ? "Your community profile" : profile.name)
                         .font(.system(size: 17, weight: .bold))
@@ -277,7 +277,7 @@ private struct RequestRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                AvatarCircle(name: request.name, size: 42)
+                AvatarCircle(name: request.name, avatarPath: request.avatarPath, size: 42)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(request.name.isEmpty ? "Friend request" : request.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -543,7 +543,7 @@ private struct StudyRoomMemberRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AvatarCircle(name: member.name, size: 40)
+            AvatarCircle(name: member.name, avatarPath: member.avatarPath, size: 40)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(member.name.isEmpty ? "Friend" : member.name)
@@ -616,26 +616,23 @@ private struct StudyRoomMemberRow: View {
 
 struct AvatarCircle: View {
     let name: String
+    let avatarPath: String
     let size: CGFloat
 
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(DesignSystem.goldGradient)
-            Text(initials)
-                .font(.system(size: size * 0.34, weight: .bold))
-                .foregroundStyle(Color(hex: "1E3A5F"))
-        }
-        .frame(width: size, height: size)
+    init(name: String, avatarPath: String? = nil, size: CGFloat) {
+        self.name = name
+        self.avatarPath = avatarPath ?? ""
+        self.size = size
     }
 
-    private var initials: String {
-        let parts = name.split(separator: " ")
-        if parts.count >= 2 {
-            return "\(parts[0].prefix(1))\(parts[1].prefix(1))".uppercased()
-        }
-        let fallback = String(name.prefix(2)).uppercased()
-        return fallback.isEmpty ? "SU" : fallback
+    var body: some View {
+        ProfileAvatarView(
+            name: name,
+            avatarPath: avatarPath,
+            size: size,
+            fallback: .initials,
+            showsGlow: false
+        )
     }
 }
 

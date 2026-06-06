@@ -1,6 +1,7 @@
 import Foundation
 import Auth       // AuthClient, Session, KeychainLocalStorage — already linked in target
 import PostgREST  // PostgrestClient — already linked in target
+import Storage
 import AuthenticationServices
 import SwiftData
 
@@ -45,6 +46,7 @@ final class SupabaseService {
     private let auth: AuthClient
     private let host: String
     private let anonKey: String
+    private let avatarBucket = "profile-avatars"
 
     private init() {
         host    = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_HOST")     as? String ?? ""
@@ -266,6 +268,7 @@ final class SupabaseService {
                     profile.appearanceRaw              = remote.appearance
                     profile.parallelLanguage           = remote.parallelLanguage
                     profile.accountabilityPartnerEmail = remote.accountabilityPartnerEmail
+                    profile.avatarPath                 = remote.avatarPath
                 }
             }
 
@@ -355,9 +358,65 @@ final class SupabaseService {
             sabbathMode:                  profile.sabbathModeEnabled,
             appearance:                   profile.appearanceRaw,
             parallelLanguage:             profile.parallelLanguage,
-            accountabilityPartnerEmail:   profile.accountabilityPartnerEmail
+            accountabilityPartnerEmail:   profile.accountabilityPartnerEmail,
+            avatarPath:                    profile.avatarPath
         )
         _ = try? await makeDB(token: session.accessToken).from("profiles").upsert(payload).execute()
+    }
+
+    func profileAvatarPublicURL(path: String) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !host.isEmpty else { return nil }
+        return URL(string: "https://\(host)/storage/v1/object/public/\(avatarBucket)/\(trimmed)")
+    }
+
+    func uploadProfileAvatar(jpegData: Data, previousPath: String) async throws -> String {
+        guard isSignedIn else { throw SupabaseProfileAvatarError.notSignedIn }
+        let session = try await auth.session
+        let uid = session.user.id.uuidString
+        let path = "\(uid)/avatar-\(UUID().uuidString).jpg"
+
+        do {
+            try await makeStorage(token: session.accessToken)
+                .from(avatarBucket)
+                .upload(
+                    path,
+                    data: jpegData,
+                    options: FileOptions(
+                        cacheControl: "31536000",
+                        contentType: "image/jpeg",
+                        upsert: false
+                    )
+                )
+
+            try await updateProfileAvatarPath(path, token: session.accessToken, userId: uid)
+
+            if !previousPath.isEmpty, previousPath != path {
+                _ = try? await makeStorage(token: session.accessToken)
+                    .from(avatarBucket)
+                    .remove(paths: [previousPath])
+            }
+
+            return path
+        } catch {
+            _ = try? await makeStorage(token: session.accessToken)
+                .from(avatarBucket)
+                .remove(paths: [path])
+            throw error
+        }
+    }
+
+    func removeProfileAvatar(path: String) async throws {
+        guard isSignedIn else { throw SupabaseProfileAvatarError.notSignedIn }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let session = try await auth.session
+        let uid = session.user.id.uuidString
+        try await updateProfileAvatarPath("", token: session.accessToken, userId: uid)
+        _ = try? await makeStorage(token: session.accessToken)
+            .from(avatarBucket)
+            .remove(paths: [trimmed])
     }
 
     func upsertStreakEntry(_ entry: StreakEntry) async {
@@ -419,6 +478,26 @@ final class SupabaseService {
             headers: ["apikey": anonKey, "Authorization": "Bearer \(token)"],
             logger:  nil
         )
+    }
+
+    private func makeStorage(token: String) -> SupabaseStorageClient {
+        SupabaseStorageClient(configuration: .init(
+            url: URL(string: "https://\(host)/storage/v1")!,
+            headers: ["apikey": anonKey, "Authorization": "Bearer \(token)"],
+            logger: nil
+        ))
+    }
+
+    private func updateProfileAvatarPath(_ path: String, token: String, userId: String) async throws {
+        let payload = ProfileAvatarPayload(
+            avatarPath: path,
+            avatarUpdatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        _ = try await makeDB(token: token)
+            .from("profiles")
+            .update(payload)
+            .eq("id", value: userId)
+            .execute()
     }
 
     private func verifyEmailOTPWithSupportedTypes(email: String, token: String) async throws -> AuthResponse {
@@ -485,6 +564,17 @@ private enum SupabaseAuthFlowError: LocalizedError {
     }
 }
 
+private enum SupabaseProfileAvatarError: LocalizedError {
+    case notSignedIn
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Sign in before uploading a profile photo."
+        }
+    }
+}
+
 // MARK: - Remote DTOs (Decodable)
 
 private struct RemoteProfile: Decodable, Sendable {
@@ -496,6 +586,7 @@ private struct RemoteProfile: Decodable, Sendable {
     let appearance:                   String
     let parallelLanguage:             String
     let accountabilityPartnerEmail:   String
+    let avatarPath:                    String
 
     enum CodingKeys: String, CodingKey {
         case name, appearance
@@ -505,6 +596,7 @@ private struct RemoteProfile: Decodable, Sendable {
         case sabbathMode                 = "sabbath_mode"
         case parallelLanguage            = "parallel_language"
         case accountabilityPartnerEmail  = "accountability_partner_email"
+        case avatarPath                  = "avatar_path"
     }
 }
 
@@ -565,6 +657,7 @@ private struct ProfilePayload: Encodable {
     let appearance:                   String
     let parallelLanguage:             String
     let accountabilityPartnerEmail:   String
+    let avatarPath:                    String
 
     enum CodingKeys: String, CodingKey {
         case id, name, appearance
@@ -574,6 +667,17 @@ private struct ProfilePayload: Encodable {
         case sabbathMode                 = "sabbath_mode"
         case parallelLanguage            = "parallel_language"
         case accountabilityPartnerEmail  = "accountability_partner_email"
+        case avatarPath                  = "avatar_path"
+    }
+}
+
+private struct ProfileAvatarPayload: Encodable {
+    let avatarPath: String
+    let avatarUpdatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case avatarPath = "avatar_path"
+        case avatarUpdatedAt = "avatar_updated_at"
     }
 }
 

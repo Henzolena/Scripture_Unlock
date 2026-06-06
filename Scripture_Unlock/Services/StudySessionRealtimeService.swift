@@ -5,6 +5,7 @@ import Realtime
 struct StudyPresence: Codable, Hashable, Identifiable {
     let userId: String
     let name: String
+    let avatarPath: String?
     let phase: String
     let joinedAt: String
 
@@ -13,6 +14,7 @@ struct StudyPresence: Codable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name, phase
         case userId = "user_id"
+        case avatarPath = "avatar_path"
         case joinedAt = "joined_at"
     }
 }
@@ -382,6 +384,7 @@ final class StudySessionRealtimeService {
         let presence = StudyPresence(
             userId: currentUserId,
             name: displayName.isEmpty ? "Friend" : displayName,
+            avatarPath: profile?.avatarPath,
             phase: phase,
             joinedAt: isoFormatter.string(from: Date())
         )

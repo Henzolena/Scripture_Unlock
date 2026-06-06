@@ -27,10 +27,12 @@ struct CommunityProfile: Decodable, Identifiable {
     let id: String
     let name: String
     let friendCode: String
+    let avatarPath: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case friendCode = "friend_code"
+        case avatarPath = "avatar_path"
     }
 }
 
@@ -38,11 +40,13 @@ struct CommunityFriend: Decodable, Identifiable {
     let id: String
     let name: String
     let friendCode: String
+    let avatarPath: String?
     let createdAt: String
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case friendCode = "friend_code"
+        case avatarPath = "avatar_path"
         case createdAt = "created_at"
     }
 }
@@ -52,6 +56,7 @@ struct CommunityRequest: Decodable, Identifiable {
     let userId: String
     let name: String
     let friendCode: String
+    let avatarPath: String?
     let message: String
     let createdAt: String
 
@@ -59,6 +64,7 @@ struct CommunityRequest: Decodable, Identifiable {
         case id, name, message
         case userId = "user_id"
         case friendCode = "friend_code"
+        case avatarPath = "avatar_path"
         case createdAt = "created_at"
     }
 }
@@ -222,6 +228,7 @@ struct StudyRoomMember: Decodable, Identifiable, Equatable {
     let userId: String
     let name: String
     let friendCode: String
+    let avatarPath: String?
     let role: String
     let status: String
     let joinedAt: String?
@@ -233,6 +240,7 @@ struct StudyRoomMember: Decodable, Identifiable, Equatable {
         case name, role, status
         case userId = "user_id"
         case friendCode = "friend_code"
+        case avatarPath = "avatar_path"
         case joinedAt = "joined_at"
         case createdAt = "created_at"
     }
@@ -271,6 +279,7 @@ struct StudySessionQuizAnswer: Decodable, Identifiable, Equatable {
 struct StudySessionQuizResult: Decodable, Identifiable, Equatable {
     let userId: String
     let userName: String
+    let avatarPath: String?
     let answered: Int
     let correct: Int
     let total: Int
@@ -282,6 +291,7 @@ struct StudySessionQuizResult: Decodable, Identifiable, Equatable {
         case answered, correct, total
         case userId = "user_id"
         case userName = "user_name"
+        case avatarPath = "avatar_path"
         case isComplete = "is_complete"
     }
 }
@@ -306,6 +316,7 @@ struct StudySessionMessage: Decodable, Identifiable, Equatable {
     let roomId: String
     let userId: String
     let userName: String
+    let avatarPath: String?
     let kind: String
     let body: String
     let verseRef: String?
@@ -317,6 +328,7 @@ struct StudySessionMessage: Decodable, Identifiable, Equatable {
         case roomId = "room_id"
         case userId = "user_id"
         case userName = "user_name"
+        case avatarPath = "avatar_path"
         case verseRef = "verse_ref"
         case createdAt = "created_at"
     }
@@ -328,6 +340,7 @@ struct StudySessionNote: Decodable, Identifiable, Equatable {
     let roomId: String
     let userId: String
     let userName: String
+    let avatarPath: String?
     let verseRef: String?
     let body: String
     let createdAt: String
@@ -339,6 +352,7 @@ struct StudySessionNote: Decodable, Identifiable, Equatable {
         case roomId = "room_id"
         case userId = "user_id"
         case userName = "user_name"
+        case avatarPath = "avatar_path"
         case verseRef = "verse_ref"
         case createdAt = "created_at"
         case updatedAt = "updated_at"

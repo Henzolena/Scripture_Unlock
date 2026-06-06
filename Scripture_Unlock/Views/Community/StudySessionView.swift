@@ -137,7 +137,7 @@ struct StudySessionView: View {
                     HStack(spacing: 10) {
                         ForEach(live.onlineMembers) { member in
                             HStack(spacing: 7) {
-                                AvatarCircle(name: member.name, size: 28)
+                                AvatarCircle(name: member.name, avatarPath: member.avatarPath, size: 28)
                                 Text(member.name)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(DesignSystem.ink)
@@ -874,7 +874,7 @@ private struct QuizResultsCard: View {
             } else {
                 ForEach(snapshot.quiz.results) { result in
                     HStack(spacing: 10) {
-                        AvatarCircle(name: result.userName, size: 30)
+                        AvatarCircle(name: result.userName, avatarPath: result.avatarPath, size: 30)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(result.userName)
                                 .font(.system(size: 13, weight: .bold))
@@ -1072,7 +1072,7 @@ private struct MessageRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            AvatarCircle(name: message.userName, size: 34)
+            AvatarCircle(name: message.userName, avatarPath: message.avatarPath, size: 34)
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text(message.userName.isEmpty ? "Friend" : message.userName)
@@ -1102,8 +1102,9 @@ private struct NoteRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(note.userName.isEmpty ? "Friend" : note.userName, systemImage: "person.fill")
+            HStack(spacing: 8) {
+                AvatarCircle(name: note.userName, avatarPath: note.avatarPath, size: 26)
+                Text(note.userName.isEmpty ? "Friend" : note.userName)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DesignSystem.royalBlue)
                 Spacer()

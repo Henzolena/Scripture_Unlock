@@ -132,8 +132,12 @@ struct HomeView: View {
                 }
 
                 Spacer()
-                GoldSeal(size: 52)
-                    .shadow(color: DesignSystem.pastoralGold.opacity(0.4), radius: 16)
+                ProfileAvatarView(
+                    name: profile?.name ?? "",
+                    avatarPath: profile?.avatarPath ?? "",
+                    size: 62,
+                    fallback: .cross
+                )
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)

@@ -190,24 +190,13 @@ struct SettingsView: View {
     }
 
     private var avatar: some View {
-        ZStack {
-            Circle()
-                .fill(DesignSystem.goldGradient)
-                .frame(width: 52, height: 52)
-            Text(initials)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Color(hex: "1E3A5F"))
-        }
-    }
-
-    private var initials: String {
-        let name = profile?.name ?? ""
-        let parts = name.split(separator: " ")
-        if parts.count >= 2 {
-            return "\(parts[0].prefix(1))\(parts[1].prefix(1))".uppercased()
-        }
-        let short = String(name.prefix(2)).uppercased()
-        return short.isEmpty ? "?" : short
+        ProfileAvatarView(
+            name: profile?.name ?? "",
+            avatarPath: profile?.avatarPath ?? "",
+            size: 52,
+            fallback: .initials,
+            showsGlow: false
+        )
     }
 
     private var syncSummary: String {

@@ -1,6 +1,24 @@
 import SwiftUI
 import SwiftData
 import AuthenticationServices
+import PhotosUI
+import UIKit
+
+private enum ProfileAvatarProcessingError: LocalizedError {
+    case unreadableImage
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadableImage:
+            return "The selected image could not be read."
+        }
+    }
+}
+
+private struct ProfileAvatarCropSource: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
 
 struct ProfileView: View {
     let profile: UserProfile
@@ -12,6 +30,11 @@ struct ProfileView: View {
     @State private var editingName       = false
     @State private var draftName         = ""
     @State private var showSignOutConfirm = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var avatarCropSource: ProfileAvatarCropSource?
+    @State private var isUploadingAvatar = false
+    @State private var avatarStatus = ""
+    @State private var showRemoveAvatarConfirm = false
 
     private var currentStreak: Int {
         var count = 0
@@ -33,14 +56,6 @@ struct ProfileView: View {
         return ans > 0 ? Double(cor) / Double(ans) : 0
     }
 
-    private var initials: String {
-        let parts = profile.name.split(separator: " ")
-        if parts.count >= 2 {
-            return "\(parts[0].prefix(1))\(parts[1].prefix(1))".uppercased()
-        }
-        return String(profile.name.prefix(2)).uppercased()
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -60,6 +75,30 @@ struct ProfileView: View {
         .background(DesignSystem.warmCream.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onChange(of: selectedPhotoItem) { _, item in
+            prepareSelectedAvatar(item)
+        }
+        .sheet(item: $avatarCropSource) { source in
+            ProfileAvatarCropperView(
+                image: source.image,
+                onCancel: {
+                    avatarCropSource = nil
+                    avatarStatus = ""
+                },
+                onCrop: { jpegData in
+                    avatarCropSource = nil
+                    uploadCroppedAvatar(jpegData)
+                }
+            )
+        }
+        .confirmationDialog("Remove profile photo?", isPresented: $showRemoveAvatarConfirm, titleVisibility: .visible) {
+            Button("Remove photo", role: .destructive) {
+                removeAvatar()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your profile will use initials until you upload another photo.")
+        }
     }
 
     private var actionRow: some View {
@@ -130,19 +169,76 @@ struct ProfileView: View {
             syncBadge
                 .padding(.top, 6)
 
+            avatarActions
+                .padding(.top, 10)
+
+            if !avatarStatus.isEmpty {
+                Text(avatarStatus)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(avatarStatus.localizedCaseInsensitiveContains("could not") ? DesignSystem.danger : DesignSystem.slate600)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 4)
+            }
+
             Color.clear.frame(height: 8)
         }
     }
 
     private var avatarCircle: some View {
         ZStack {
-            Circle()
-                .fill(DesignSystem.goldGradient)
-                .frame(width: 82, height: 82)
-                .shadow(color: DesignSystem.pastoralGold.opacity(0.45), radius: 14)
-            Text(initials.isEmpty ? "?" : initials)
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(Color(hex: "1E3A5F"))
+            ProfileAvatarView(
+                name: profile.name,
+                avatarPath: profile.avatarPath,
+                size: 82,
+                fallback: .initials
+            )
+
+            if isUploadingAvatar {
+                Circle()
+                    .fill(Color.black.opacity(0.36))
+                    .frame(width: 82, height: 82)
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+    }
+
+    private var avatarActions: some View {
+        HStack(spacing: 8) {
+            PhotosPicker(
+                selection: $selectedPhotoItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                AppActionLabel(
+                    title: profile.avatarPath.isEmpty ? "Add photo" : "Change photo",
+                    icon: "camera.fill",
+                    style: supabase.isSignedIn ? .secondary : .neutral,
+                    size: .toolbar,
+                    fullWidth: false,
+                    disabled: !supabase.isSignedIn || isUploadingAvatar
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!supabase.isSignedIn || isUploadingAvatar)
+
+            if !profile.avatarPath.isEmpty {
+                Button {
+                    showRemoveAvatarConfirm = true
+                } label: {
+                    AppActionLabel(
+                        title: "Remove",
+                        icon: "trash",
+                        style: .neutral,
+                        size: .toolbar,
+                        fullWidth: false,
+                        disabled: isUploadingAvatar
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isUploadingAvatar)
+            }
         }
     }
 
@@ -190,6 +286,115 @@ struct ProfileView: View {
                 .foregroundStyle(DesignSystem.slate400)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func prepareSelectedAvatar(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        guard supabase.isSignedIn else {
+            avatarStatus = "Sign in before uploading a profile photo."
+            selectedPhotoItem = nil
+            return
+        }
+
+        isUploadingAvatar = true
+        avatarStatus = "Loading photo..."
+
+        Task {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw ProfileAvatarProcessingError.unreadableImage
+                }
+
+                let image = try Self.normalizedAvatarSource(from: data)
+
+                await MainActor.run {
+                    avatarCropSource = ProfileAvatarCropSource(image: image)
+                    avatarStatus = ""
+                    isUploadingAvatar = false
+                    selectedPhotoItem = nil
+                }
+            } catch {
+                await MainActor.run {
+                    avatarStatus = "Could not load photo: \(error.localizedDescription)"
+                    isUploadingAvatar = false
+                    selectedPhotoItem = nil
+                }
+            }
+        }
+    }
+
+    private func uploadCroppedAvatar(_ jpegData: Data) {
+        guard supabase.isSignedIn else {
+            avatarStatus = "Sign in before uploading a profile photo."
+            return
+        }
+
+        isUploadingAvatar = true
+        avatarStatus = "Uploading photo..."
+
+        Task {
+            do {
+                let previousPath = await MainActor.run { profile.avatarPath }
+                let newPath = try await supabase.uploadProfileAvatar(
+                    jpegData: jpegData,
+                    previousPath: previousPath
+                )
+
+                await MainActor.run {
+                    profile.avatarPath = newPath
+                    avatarStatus = "Photo updated"
+                    isUploadingAvatar = false
+                    selectedPhotoItem = nil
+                }
+            } catch {
+                await MainActor.run {
+                    avatarStatus = "Could not upload photo: \(error.localizedDescription)"
+                    isUploadingAvatar = false
+                    selectedPhotoItem = nil
+                }
+            }
+        }
+    }
+
+    private func removeAvatar() {
+        guard !profile.avatarPath.isEmpty else { return }
+        let path = profile.avatarPath
+
+        isUploadingAvatar = true
+        avatarStatus = "Removing photo..."
+
+        Task {
+            do {
+                try await supabase.removeProfileAvatar(path: path)
+                await MainActor.run {
+                    profile.avatarPath = ""
+                    avatarStatus = "Photo removed"
+                    isUploadingAvatar = false
+                }
+            } catch {
+                await MainActor.run {
+                    avatarStatus = "Could not remove photo: \(error.localizedDescription)"
+                    isUploadingAvatar = false
+                }
+            }
+        }
+    }
+
+    nonisolated private static func normalizedAvatarSource(from data: Data) throws -> UIImage {
+        guard let source = UIImage(data: data) else {
+            throw ProfileAvatarProcessingError.unreadableImage
+        }
+        guard source.size.width > 0, source.size.height > 0 else {
+            throw ProfileAvatarProcessingError.unreadableImage
+        }
+        guard source.imageOrientation != .up else {
+            return source
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: source.size)
+        return renderer.image { _ in
+            source.draw(in: CGRect(origin: .zero, size: source.size))
+        }
     }
 
     // MARK: - Sync section
