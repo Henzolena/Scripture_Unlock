@@ -7,7 +7,12 @@ import Foundation
 /// Question priority
 /// ─────────────────
 /// 1. AI-generated questions from QuestionGeneratorAgent cache (Railway API or Gemini)
-/// 2. Returns nil when cache is empty — the ViewModel shows a "Generating…" state
+/// 2. Bundled offline questions from BundledQuestionStore
+///
+/// Tier 2 exists because tier 1 needs the network both to generate *and* to
+/// validate, while used questions are consumed permanently. Without a floor the
+/// cache eventually empties and the alarm can no longer be silenced. These
+/// methods therefore only return nil when the bundle is empty too.
 ///
 /// The agent is asked to prefetch more questions whenever the cache is low;
 /// this never blocks question delivery.
@@ -19,7 +24,8 @@ final class TriviaService {
     /// Questions shown in the current morning session (reset each day).
     private var sessionUsedIds: Set<String> = []
 
-    private let agent = QuestionGeneratorAgent.shared
+    private let agent  = QuestionGeneratorAgent.shared
+    private let bundle = BundledQuestionStore.shared
 
     private init() {}
 
@@ -34,50 +40,60 @@ final class TriviaService {
         // Kick off background generation so the cache stays warm for next time
         agent.prefetchIfNeeded(forPack: packId, difficulty: difficulty)
 
-        // AI-generated questions from the agent cache (Railway API or Gemini fallback)
-        let generated = agent.questions(forPack: packId, difficulty: difficulty)
-        let generatedPool = generated.filter {
-            !excluding.contains($0.id) && !sessionUsedIds.contains($0.id)
-        }
+        let blocked = excluding.union(sessionUsedIds)
+
+        // Tier 1 — AI-generated questions (Railway API or Gemini fallback)
+        let generatedPool = agent.questions(forPack: packId, difficulty: difficulty)
+            .filter { !blocked.contains($0.id) }
         if let q = generatedPool.randomElement() {
             agent.consume(q)   // remove from cache so it isn't reused
-            return q
+            return q.shuffledOptions()
         }
 
-        // Cache is empty — background generation was already triggered by prefetchIfNeeded.
-        // Return nil so the ViewModel can show a "generating" state instead of a stale question.
+        // Tier 2 — bundled offline questions. Not consumed, so this tier can
+        // never run dry within a session beyond its own exclusion set.
+        if let q = bundle.questions(forPack: packId, difficulty: difficulty, excluding: blocked)
+            .randomElement() {
+            print("[TriviaService] AI cache empty — serving bundled offline question")
+            return q.shuffledOptions()
+        }
+
         return nil
     }
 
     /// Anti-cheese: pick a replacement after a wrong answer.
-    /// MUST be from a different book than the missed question.
+    /// Prefers a different book than the missed question.
     func replacementQuestion(
         after missed: TriviaQuestion,
         packId: String,
         difficulty: Difficulty,
         excluding: Set<String>
     ) -> TriviaQuestion? {
-        var excl = excluding
+        var excl = excluding.union(sessionUsedIds)
         excl.insert(missed.id)
 
-        // Try AI cache — different book required
         let generated = agent.questions(forPack: packId, difficulty: difficulty)
-        let genDiffBook = generated.filter {
-            $0.book != missed.book && !excl.contains($0.id)
-        }
+
+        // Tier 1a — AI cache, different book required
+        let genDiffBook = generated.filter { $0.book != missed.book && !excl.contains($0.id) }
         if let q = genDiffBook.randomElement() {
             agent.consume(q)
-            return q
+            return q.shuffledOptions()
         }
 
-        // Try any cached question regardless of book (different book preference exhausted)
-        let genAny = generated.filter { !excl.contains($0.id) }
-        if let q = genAny.randomElement() {
+        // Tier 1b — any cached question (different-book preference exhausted)
+        if let q = generated.filter({ !excl.contains($0.id) }).randomElement() {
             agent.consume(q)
-            return q
+            return q.shuffledOptions()
         }
 
-        // Cache is empty — return nil; ViewModel will show "generating" state
+        // Tier 2 — bundled offline questions
+        if let q = bundle.replacement(after: missed, packId: packId,
+                                      difficulty: difficulty, excluding: excl) {
+            print("[TriviaService] AI cache empty — serving bundled offline replacement")
+            return q.shuffledOptions()
+        }
+
         return nil
     }
 

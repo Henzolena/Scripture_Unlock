@@ -58,7 +58,14 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
         kind        = try c.decode(Kind.self,        forKey: .kind)
         book        = try c.decode(String.self,     forKey: .book)
         packId      = try c.decode(String.self,     forKey: .packId)
-        difficulty  = try c.decode(Difficulty.self, forKey: .difficulty)
+        // Difficulty rawValues are capitalised ("Regular"), but bundled JSON and
+        // some generator responses use lowercase. Match case-insensitively rather
+        // than failing the whole question — a strict decode here is what silently
+        // made the bundled offline questions unloadable.
+        let rawDifficulty = try c.decode(String.self, forKey: .difficulty)
+        difficulty = Difficulty.allCases.first {
+            $0.rawValue.caseInsensitiveCompare(rawDifficulty) == .orderedSame
+        } ?? .regular
         prompt      = try c.decodeIfPresent(String.self, forKey: .prompt)
         // Gemini sometimes returns null for these on fill questions — default safely
         options     = (try? c.decode([String].self, forKey: .options)) ?? []
@@ -67,6 +74,34 @@ struct TriviaQuestion: Identifiable, Codable, Hashable {
         fillPost    = try c.decodeIfPresent(String.self, forKey: .fillPost)
         verseRef    = try c.decode(String.self,     forKey: .verseRef)
         verseText   = try c.decode(String.self,     forKey: .verseText)
+    }
+
+    /// Returns a copy with `options` shuffled and `answerIndex` remapped to follow
+    /// the correct answer.
+    ///
+    /// Generators have a well-documented position bias — the correct choice lands
+    /// in the same slot far more often than chance. Without this a user learns to
+    /// pattern-match the layout instead of reading the question, which defeats the
+    /// point of answering scripture to get out of bed.
+    func shuffledOptions() -> TriviaQuestion {
+        guard options.count > 1,
+              options.indices.contains(answerIndex) else { return self }
+
+        let correct = options[answerIndex]
+        var shuffled = options
+        // Guard against a shuffle that leaves the answer in place.
+        for _ in 0..<8 {
+            shuffled.shuffle()
+            if shuffled != options { break }
+        }
+        guard let newIndex = shuffled.firstIndex(of: correct) else { return self }
+
+        return TriviaQuestion(
+            id: id, kind: kind, book: book, packId: packId, difficulty: difficulty,
+            prompt: prompt, options: shuffled, answerIndex: newIndex,
+            fillPre: fillPre, fillPost: fillPost,
+            verseRef: verseRef, verseText: verseText
+        )
     }
 
     /// Safe accessor — never crashes even if Gemini returned a bad answerIndex.

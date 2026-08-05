@@ -20,8 +20,9 @@ struct TriviaContainerView: View {
         ZStack {
             switch vm.phase {
             case .ringing:
+                // begin() is driven by the container's own onAppear below. Calling
+                // it from here as well double-invoked it and burned a cached question.
                 Color(DesignSystem.warmCream).ignoresSafeArea()
-                    .onAppear { vm.begin(language: parallelLanguage) }
 
             case .question:
                 questionView
@@ -86,7 +87,9 @@ struct TriviaContainerView: View {
 
         entry.questionsAnswered += vm.totalAttempts
         entry.questionsCorrect  += vm.completedSteps
-        entry.snoozeCount       += alarm.snoozeCountToday
+        // Read the value captured at dismiss time — alarm.snoozeCountToday is
+        // concurrently reset to zero by dismissAlarm().
+        entry.snoozeCount       += vm.snoozeCountAtDismiss
         entry.dismissedAt        = Date()
 
         Task { await supabase.upsertStreakEntry(entry) }
@@ -123,7 +126,66 @@ struct TriviaContainerView: View {
             }
         } else if vm.isGeneratingQuestions {
             generatingView
+        } else {
+            // Previously there was no branch here at all: when no question could be
+            // produced the screen rendered empty while the alarm kept ringing, with
+            // the overlay deliberately un-dismissable. Always show something the
+            // user can act on.
+            unavailableView
         }
+    }
+
+    /// Shown when every question source has failed. Offers a retry and, as a last
+    /// resort, a way to stop the alarm — being unable to silence it is worse than
+    /// skipping the devotion.
+    private var unavailableView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 40, weight: .semibold))
+                .foregroundStyle(DesignSystem.pastoralGold)
+
+            VStack(spacing: 8) {
+                Text("Couldn't load a question")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(DesignSystem.ink)
+                Text("You may be offline. Try again, or silence the alarm and pick this up later.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(DesignSystem.slate600)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 12) {
+                Button {
+                    vm.retryQuestionLoad()
+                } label: {
+                    Text("Try again")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(DesignSystem.deepBlue)
+                        .cornerRadius(14)
+                }
+
+                if vm.questionSourcesExhausted {
+                    Button {
+                        vm.forceSilenceAfterFailure()
+                    } label: {
+                        Text("Silence alarm")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(DesignSystem.slate600)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                    }
+                }
+            }
+            .padding(.top, 4)
+
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Shown when the AI question cache is empty and generation is in progress.

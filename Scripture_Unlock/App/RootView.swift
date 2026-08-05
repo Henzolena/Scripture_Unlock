@@ -55,11 +55,26 @@ struct RootView: View {
         // Also run the AlarmKit check here because on cold launch the @Query
         // alarms array may still be empty when scenePhase fires .active.
         .task {
+            // Let AlarmService resolve notification payloads back to the live
+            // SwiftData object instead of rebuilding a detached copy that loses
+            // repeatDays and the snooze question penalty.
+            alarmService.alarmResolver = { [context] id in
+                let all = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
+                return all.first { $0.id == id }
+            }
+
             let savedAlarms = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
             await alarmService.rescheduleAll(savedAlarms)
             if #available(iOS 26, *) {
                 alarmService.checkPendingAlarmKitAlarm(alarms: savedAlarms)
             }
+        }
+        // Ask for notification permission only once the user has a profile, so the
+        // system dialog lands after onboarding has explained why an alarm app needs
+        // it. Requesting from AlarmService.init() fired it during cold launch.
+        .task(id: profiles.isEmpty) {
+            guard !profiles.isEmpty else { return }
+            await alarmService.requestPermissions()
         }
         // Safety net: retry when SwiftData finishes loading the alarms query
         .onChange(of: alarms) { _, loaded in

@@ -145,7 +145,13 @@ extension AlarmService {
             alarm.snoozeCountToday += 1
             // Reschedule to ring again in exactly 5 minutes (not tomorrow's regular time)
             let snoozeFireDate = Date(timeIntervalSinceNow: 5 * 60)
-            Task { await scheduleWithAlarmKit(alarm, snoozeFireDate: snoozeFireDate) }
+            Task {
+                await scheduleWithAlarmKit(alarm, snoozeFireDate: snoozeFireDate)
+                // Belt-and-braces: also arm a plain notification. If AlarmKit
+                // authorization is unavailable, scheduleWithAlarmKit returns early
+                // and the snooze would otherwise never ring again.
+                await scheduleSnoozeFallback(for: alarm, fireDate: snoozeFireDate)
+            }
 
             // Respect the snooze choice: if the background timer fired simultaneously
             // and already set activeAlarm (showing the quiz), clear it. Remove the stale

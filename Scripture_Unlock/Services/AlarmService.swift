@@ -46,6 +46,20 @@ final class AlarmService: NSObject {
 
     private var activeNotificationId: String?
 
+    /// Resolves an alarm id to the live SwiftData object. Set once by RootView.
+    ///
+    /// Without this, alarms arriving via a notification were rebuilt from userInfo
+    /// into a detached copy that dropped `repeatDays` and `snoozeCountToday`. That
+    /// meant the snooze question penalty silently vanished, `dismissAlarm` cleared
+    /// the penalty on a throwaway object so the real alarm kept it forever, and the
+    /// AlarmKit repeat-schedule restore never ran.
+    var alarmResolver: ((UUID) -> Alarm?)?
+
+    /// Leave headroom under iOS's 64-pending-notification cap. Past the limit iOS
+    /// silently keeps only the soonest requests and drops the rest with no error,
+    /// so a user with many repeating alarms would lose them without warning.
+    private let notificationRequestBudget = 56
+
     // MARK: - Audio engine (for keep-alive) + AVAudioPlayer (for alarm tone)
     private var audioEngine      = AVAudioEngine()
     private var playerNode       = AVAudioPlayerNode()
@@ -55,18 +69,28 @@ final class AlarmService: NSObject {
 
     // MARK: - Background monitoring
     private var backgroundTimer: Timer?
-    private var monitoredAlarm: Alarm?   // the alarm the timer is armed for
+    private var monitoredAlarm: Alarm?    // the alarm the timer is armed for
+    private var monitoredAlarms: [Alarm] = []  // full set, so the timer can re-arm
+
+    /// Start the silent keep-alive only when an alarm is this close.
+    private static let keepAliveWindow: TimeInterval = 30 * 60
 
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
         setupAudioEngine()
-        Task { await requestPermissions() }
+        // Deliberately does NOT prompt here. Constructing the singleton used to
+        // fire the system permission dialog during launch, before onboarding had
+        // explained why an alarm app needs notifications — and a denial here
+        // breaks the core feature. RootView calls requestPermissions() once the
+        // user has a profile instead.
     }
 
     // MARK: - Permissions
 
-    private func requestPermissions() async {
+    /// Requests notification + AlarmKit authorization. Safe to call repeatedly:
+    /// iOS only shows the dialog on the first request.
+    func requestPermissions() async {
         let granted = try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge])
         await MainActor.run { hasNotificationPermission = granted ?? false }
@@ -194,16 +218,30 @@ final class AlarmService: NSObject {
         stopBackgroundMonitoring()          // cancel any previous timer
         guard activeAlarm == nil else { return }  // already ringing — no-op
 
-        // Find the soonest upcoming alarm
-        let upcoming = alarms
+        monitoredAlarms = alarms
+        armNextBackgroundTimer()
+    }
+
+    /// Arms a timer for the soonest upcoming alarm in `monitoredAlarms`.
+    ///
+    /// Re-armed after each fire so a second alarm later in the same background
+    /// stretch is still driven in-process — previously only the first one was, and
+    /// everything after it depended solely on notifications.
+    private func armNextBackgroundTimer() {
+        backgroundTimer?.invalidate()
+        backgroundTimer = nil
+
+        let upcoming = monitoredAlarms
             .compactMap { alarm -> (alarm: Alarm, date: Date)? in
                 guard let d = alarm.nextActualFireDate else { return nil }
                 return (alarm, d)
             }
             .sorted { $0.date < $1.date }
             .first
+
         guard let next = upcoming else {
             print("[AlarmService] No upcoming alarms — skipping background monitoring")
+            stopKeepAlive()
             return
         }
 
@@ -211,9 +249,18 @@ final class AlarmService: NSObject {
         guard delay > 0 else { return }
 
         monitoredAlarm = next.alarm
-        startKeepAlive()
 
-        // Timer fires at alarm time and triggers everything
+        // Only hold the audio session open when an alarm is actually near. Running
+        // a silent buffer indefinitely is both a battery cost and the pattern App
+        // Review guideline 2.5.4 targets (background audio must be audible
+        // content). Beyond this window the scheduled notification is the mechanism.
+        if delay <= Self.keepAliveWindow {
+            startKeepAlive()
+        } else {
+            stopKeepAlive()
+            print("[AlarmService] Next alarm in \(Int(delay))s — keep-alive deferred")
+        }
+
         let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
             self?.fireFromBackground(next.alarm)
         }
@@ -228,6 +275,7 @@ final class AlarmService: NSObject {
         backgroundTimer?.invalidate()
         backgroundTimer   = nil
         monitoredAlarm    = nil
+        monitoredAlarms   = []
         stopKeepAlive()
     }
 
@@ -244,8 +292,11 @@ final class AlarmService: NSObject {
             let content = UNMutableNotificationContent()
             content.title             = "⏰ \(alarm.label)"
             content.body              = "Answer \(alarm.effectiveQuestionCount) Bible verses to silence the alarm."
-            content.sound             = UNNotificationSound(named: UNNotificationSoundName(rawValue: "alarm_ringtone.caf"))
-            if content.sound == nil { content.sound = .default }
+            // Use the alarm's own tone. This previously named "alarm_ringtone.caf",
+            // which is not in the bundle — and because UNNotificationSound(named:)
+            // is non-optional the nil-check below it never fired, so iOS silently
+            // played nothing and the user's tone choice was ignored.
+            content.sound             = AlarmTone.find(id: alarm.toneIdentifier).notificationSound
             content.interruptionLevel = .timeSensitive
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             let request = UNNotificationRequest(
@@ -255,6 +306,9 @@ final class AlarmService: NSObject {
             )
             try? await UNUserNotificationCenter.current().add(request)
             print("[AlarmService] Fired from background: \(alarm.label)")
+
+            // Re-arm for any later alarm in this background stretch.
+            self.armNextBackgroundTimer()
         }
     }
 
@@ -343,12 +397,34 @@ final class AlarmService: NSObject {
     }
 
     func rescheduleAll(_ alarms: [Alarm]) async {
-        for alarm in alarms where alarm.isEnabled {
+        // Schedule soonest-first and stop at the request budget. A repeating alarm
+        // costs one request per selected weekday, so ~9 weekday alarms alone would
+        // exceed the 64-request cap and iOS would start dropping them silently.
+        let enabled = alarms
+            .filter { $0.isEnabled }
+            .compactMap { alarm -> (alarm: Alarm, date: Date)? in
+                guard let d = alarm.nextActualFireDate else { return nil }
+                return (alarm, d)
+            }
+            .sorted { $0.date < $1.date }
+
+        var spent = 0
+        for (alarm, _) in enabled {
             // Reset the snooze penalty unless this alarm is currently ringing —
             // resetting mid-quiz would change the question count under the user.
             if alarm.id != activeAlarm?.id {
                 alarm.snoozeCountToday = 0
             }
+
+            let cost = max(1, alarm.repeatDays.count)
+            guard spent + cost <= notificationRequestBudget else {
+                print("""
+                [AlarmService] Notification budget reached (\(spent)/\(notificationRequestBudget)) \
+                — '\(alarm.label)' and any later alarms rely on AlarmKit only
+                """)
+                break
+            }
+            spent += cost
             try? await schedule(alarm)
         }
     }
@@ -357,6 +433,35 @@ final class AlarmService: NSObject {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: allIdentifiers(for: alarm))
         if #available(iOS 26, *) { cancelWithAlarmKit(alarm) }
+    }
+
+    /// Schedules a plain notification for a snoozed alarm.
+    ///
+    /// Snooze previously rescheduled only through AlarmKit. That entitlement still
+    /// requires Apple approval, so on any device where it is unavailable the snooze
+    /// silently never rang again and the user overslept. This is the fallback path.
+    func scheduleSnoozeFallback(for alarm: Alarm, fireDate: Date) async {
+        let delay = fireDate.timeIntervalSinceNow
+        guard delay > 0 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title             = "⏰ \(alarm.label)"
+        content.body              = "Snooze over — answer \(alarm.effectiveQuestionCount) verses to silence the alarm."
+        content.sound             = AlarmTone.find(id: alarm.toneIdentifier).notificationSound
+        content.interruptionLevel = .timeSensitive
+        content.userInfo          = makeContent(alarm: alarm, notificationId: snoozeIdentifier(for: alarm)).userInfo
+
+        let request = UNNotificationRequest(
+            identifier: snoozeIdentifier(for: alarm),
+            content:    content,
+            trigger:    UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+        print("[AlarmService] Snooze fallback notification armed in \(Int(delay))s")
+    }
+
+    func snoozeIdentifier(for alarm: Alarm) -> String {
+        "snooze-\(alarm.id.uuidString)"
     }
 
     /// Called by TriviaViewModel after all correct answers — fully silences the alarm.
@@ -394,7 +499,7 @@ final class AlarmService: NSObject {
     }
 
     private func allIdentifiers(for alarm: Alarm) -> [String] {
-        var ids = [alarm.id.uuidString]
+        var ids = [alarm.id.uuidString, snoozeIdentifier(for: alarm)]
         ids += (0..<7).map { dayIdentifier(alarm: alarm, day: $0) }
         return ids
     }
@@ -429,6 +534,10 @@ final class AlarmService: NSObject {
             let id    = UUID(uuidString: idStr),
             let label = userInfo["alarmLabel"] as? String
         else { return nil }
+
+        // Prefer the live SwiftData object so repeatDays and snoozeCountToday are
+        // real. Only fall back to rebuilding from userInfo if it cannot be found.
+        if let live = alarmResolver?(id) { return live }
 
         let alarm              = Alarm(label: label, hour: userInfo["hour"] as? Int ?? 6,
                                        minute: userInfo["minute"] as? Int ?? 0)
