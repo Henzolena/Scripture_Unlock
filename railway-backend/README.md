@@ -52,14 +52,29 @@ curl -X POST https://ethiopian-bible-api-production.up.railway.app/api/v1/votd/g
   -H "X-Admin-Key: YOUR_VOTD_ADMIN_KEY"
 ```
 
-### Daily cron (Railway Cron Job)
-Create a Railway Cron Job service in the same project:
-- Schedule: `0 4 * * *`  (4 AM UTC — before most users wake up)
+### Daily cron — already created ✅
+Service **`VOTD-Audio-Cron`** exists in project `cozy-strength` / `production`
+(id `aa0b90b3-f8b6-400b-96c9-b742a7a254de`):
+
+- Image: `curlimages/curl:latest`
+- Schedule: `0 4 * * *` (4 AM UTC — before most users wake up)
+- Restart policy: `NEVER` (it is a one-shot job, not a server)
 - Command:
   ```bash
-  curl -X POST https://ethiopian-bible-api-production.up.railway.app/api/v1/votd/generate-audio \
-    -H "X-Admin-Key: $VOTD_ADMIN_KEY"
+  curl -fsS --max-time 600 -X POST \
+    https://ethiopian-bible-api-production.up.railway.app/api/v1/votd/request-audio
   ```
+
+It calls `request-audio` rather than `generate-audio`, so it needs no
+`VOTD_ADMIN_KEY` variable of its own — hence "Variables defined: 0" on that
+service. Either endpoint runs the same pipeline.
+
+### Why the cron is a pre-warm, not a requirement
+`POST /votd/request-audio` is public and kicks the pipeline off as a background
+task, and `VersOfDayAudioPlayer` already calls it and polls. So audio would
+eventually appear without any cron. The cron matters because this is an *alarm*
+app: the first user of the day is someone waking up, and TTS generation takes
+roughly 30–60s. The cron pays that cost at 4 AM instead of making them wait.
 
 ## Check today's verse + audio status (no auth)
 ```bash
