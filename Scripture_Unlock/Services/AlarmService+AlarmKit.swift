@@ -55,10 +55,9 @@ extension AlarmService {
             systemImageName: "clock"
         )
 
-        let alert = AlarmPresentation.Alert(
+        let alert = Self.makeAlert(
             title: LocalizedStringResource(stringLiteral: alarm.label),
-            secondaryButton: snoozeButton,
-            secondaryButtonBehavior: .custom
+            snoozeButton: snoozeButton
         )
 
         let metadata = ScriptureAlarmMetadata(
@@ -113,6 +112,50 @@ extension AlarmService {
 
         _ = try? await AlarmManager.shared.schedule(id: alarm.id, configuration: config)
         print("[AlarmKit] Scheduled '\(alarm.label)' → \(fireDate)")
+    }
+
+    // MARK: - Alert construction (runtime-compatible)
+
+    /// Builds the lock-screen alert using the `stopButton:` initialiser.
+    ///
+    /// This looks like the wrong choice — that parameter is deprecated from iOS
+    /// 26.1 with "stopButton is deprecated and will no longer be used", so the
+    /// value is ignored and the system default dismiss UI is shown instead. It is
+    /// deliberate, because it is the only form present in *every* 26.x runtime.
+    ///
+    /// The modern `init(title:secondaryButton:secondaryButtonBehavior:)` is
+    /// annotated `@available(iOS 26.1, *)`, which equals this app's deployment
+    /// target — so it is strongly linked, not weak-imported (0 of 44 AlarmKit
+    /// symbol references are weak). Any 26.1 runtime that predates the final API
+    /// therefore fails to bind it and dyld aborts the process *at launch*, before
+    /// any code runs, which no `#available` check can guard. The 26.1 simulator
+    /// runtime shipped with Xcode 26.2 (build 23B5059e, a pre-release seed) is
+    /// exactly such a runtime: it exports only the `stopButton:` form.
+    ///
+    /// Using the deprecated initialiser costs nothing at runtime on 26.1+ and
+    /// keeps the app launchable everywhere. Revisit once the minimum supported
+    /// runtime is known to post-date the reshape.
+    ///
+    /// The enclosing method carries a matching `@available(..., deprecated:)`
+    /// annotation so the deprecation warning is suppressed at this one call site
+    /// rather than project-wide.
+    @available(iOS, deprecated: 26.1, message: "Intentionally uses the stopButton initialiser for 26.1 runtime compatibility")
+    private static func makeAlert(
+        title: LocalizedStringResource,
+        snoozeButton: AlarmButton
+    ) -> AlarmPresentation.Alert {
+        // Ignored on 26.1+, used by pre-release 26.1 runtimes where it is required.
+        let stopButton = AlarmButton(
+            text: "Open",
+            textColor: .white,
+            systemImageName: "book.fill"
+        )
+        return AlarmPresentation.Alert(
+            title: title,
+            stopButton: stopButton,
+            secondaryButton: snoozeButton,
+            secondaryButtonBehavior: .custom
+        )
     }
 
     // MARK: - Cancel (synchronous in AlarmKit)
