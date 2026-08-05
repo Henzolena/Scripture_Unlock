@@ -4,10 +4,11 @@ import SwiftData
 /// Root navigator — decides between Onboarding and the main app.
 /// Also intercepts when AlarmService fires an alarm mid-use.
 struct RootView: View {
-    @Environment(AlarmService.self)     private var alarmService
-    @Environment(SupabaseService.self)  private var supabase
-    @Environment(\.modelContext)        private var context
-    @Environment(\.scenePhase)          private var scenePhase
+    @Environment(AlarmService.self)      private var alarmService
+    @Environment(SupabaseService.self)   private var supabase
+    @Environment(AchievementService.self) private var achievements
+    @Environment(\.modelContext)         private var context
+    @Environment(\.scenePhase)           private var scenePhase
     @Query private var profiles: [UserProfile]
     @Query(sort: \Alarm.createdAt) private var alarms: [Alarm]
 
@@ -24,26 +25,48 @@ struct RootView: View {
     @State private var router = NavigationRouter()
 
     var body: some View {
-        Group {
-            if profiles.isEmpty {
-                OnboardingFlow()
-            } else {
-                MainTabView(router: router)
-                    .fullScreenCover(item: Binding(
-                        get: { alarmService.activeAlarm },
-                        set: { _ in }
-                    )) { alarm in
-                        RingingView(alarm: alarm)
-                            .interactiveDismissDisabled(true)
+        ZStack(alignment: .bottom) {
+            Group {
+                if profiles.isEmpty {
+                    OnboardingFlow()
+                } else {
+                    ZStack {
+                        MainTabView(router: router)
+
+                        // Alarm overlay — sits directly in the view hierarchy so
+                        // it cannot be dismissed by swipe, sheet gesture, or iOS
+                        // background/foreground transitions. Only dismissed when
+                        // TriviaViewModel.silenceAlarm() sets activeAlarm = nil.
+                        if let alarm = alarmService.activeAlarm {
+                            RingingView(alarm: alarm)
+                                .ignoresSafeArea()
+                                .transition(.opacity)
+                                .zIndex(100)
+                        }
                     }
+                }
             }
+
+            AppToastView()
         }
         .environment(router)
         .preferredColorScheme(preferredColorScheme)
         // One-time startup: reschedule saved alarms for this device.
+        // Also run the AlarmKit check here because on cold launch the @Query
+        // alarms array may still be empty when scenePhase fires .active.
         .task {
             let savedAlarms = (try? context.fetch(FetchDescriptor<Alarm>())) ?? []
             await alarmService.rescheduleAll(savedAlarms)
+            if #available(iOS 26, *) {
+                alarmService.checkPendingAlarmKitAlarm(alarms: savedAlarms)
+            }
+        }
+        // Safety net: retry when SwiftData finishes loading the alarms query
+        .onChange(of: alarms) { _, loaded in
+            guard !loaded.isEmpty else { return }
+            if #available(iOS 26, *) {
+                alarmService.checkPendingAlarmKitAlarm(alarms: loaded)
+            }
         }
         // Sync whenever sign-in state changes (also fires once on launch with
         // the initial value, which is fine — syncFromCloud guards against
@@ -60,6 +83,14 @@ struct RootView: View {
                 // we do NOT sync here to avoid a third concurrent call.
                 alarmService.stopBackgroundMonitoring()
                 alarmService.cancelReengagementNotification()
+                // Process AlarmKit events FIRST — snooze handling may clear activeAlarm,
+                // in which case we must NOT restart audio (brief blip otherwise).
+                if #available(iOS 26, *) {
+                    alarmService.checkPendingAlarmKitAlarm(alarms: alarms)
+                }
+                // Re-start audio only if an alarm is still active after AlarmKit processing
+                // (e.g. user backgrounded mid-quiz before the 0.5 s delay fired).
+                alarmService.restartAlarmAudioIfNeeded()
             } else if newPhase == .background {
                 if alarmService.activeAlarm != nil {
                     // Mid-alarm backgrounding: post re-engagement notification
@@ -93,7 +124,7 @@ struct MainTabView: View {
                 tabPage(.settings) { SettingsView() }
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 92)
+                Color.clear.frame(height: 110)
             }
 
             AppBottomTabBar(selectedTab: Binding(

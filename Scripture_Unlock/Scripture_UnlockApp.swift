@@ -11,9 +11,15 @@ import SwiftData
 @main
 struct Scripture_UnlockApp: App {
 
-    @State private var alarmService   = AlarmService.shared
-    @State private var triviaService  = TriviaService.shared
-    @State private var supabaseService = SupabaseService.shared
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    @State private var alarmService       = AlarmService.shared
+    @State private var triviaService      = TriviaService.shared
+    @State private var supabaseService    = SupabaseService.shared
+    @State private var bookmarkService    = BookmarkService.shared
+    @State private var noteService        = VerseNoteService.shared
+    @State private var achievementService = AchievementService.shared
+    @State private var toastService       = ToastService.shared
 
     init() {
         AppAppearance.configure()
@@ -22,8 +28,8 @@ struct Scripture_UnlockApp: App {
         // registered before the system delivers any pending responses.
         _ = AlarmService.shared
 
-        // Warm the AI question cache in the background so questions are ready
-        // by the time the first alarm fires.
+        // Warm AI question cache and register for push notifications.
+        Task { await PushNotificationService.shared.requestAndRegister() }
         Task {
             for pack in VersePack.all {
                 for difficulty in [Difficulty.gentle, .regular, .scholar] {
@@ -42,6 +48,10 @@ struct Scripture_UnlockApp: App {
                 .environment(alarmService)
                 .environment(triviaService)
                 .environment(supabaseService)
+                .environment(bookmarkService)
+                .environment(noteService)
+                .environment(achievementService)
+                .environment(toastService)
         }
     }
 }

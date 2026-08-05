@@ -21,7 +21,7 @@ struct CommunityView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
-                .padding(.bottom, 32)
+                .padding(.bottom, 100)
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
@@ -30,17 +30,26 @@ struct CommunityView: View {
             }
             .sheet(isPresented: $showAddFriend) {
                 AddFriendSheet { code, message in
-                    Task { await community.sendFriendRequest(code: code, message: message) }
+                    Task {
+                        await community.sendFriendRequest(code: code, message: message)
+                        ToastService.shared.friendRequestSent()
+                    }
                 }
             }
             .sheet(isPresented: $showCreateRoom) {
                 CreateRoomSheet { name, description, packId, language in
-                    Task { await community.createRoom(name: name, description: description, packId: packId, language: language) }
+                    Task {
+                        await community.createRoom(name: name, description: description, packId: packId, language: language)
+                        ToastService.shared.roomCreated()
+                    }
                 }
             }
             .sheet(isPresented: $showJoinRoom) {
                 JoinRoomSheet { code in
-                    Task { await community.joinRoom(code: code) }
+                    Task {
+                        await community.joinRoom(code: code)
+                        ToastService.shared.roomJoined()
+                    }
                 }
             }
         }
@@ -82,6 +91,7 @@ struct CommunityView: View {
             requestsSection
             friendsSection
             roomsSection
+            leaderboardSection
         }
     }
 
@@ -125,7 +135,11 @@ struct CommunityView: View {
             } else {
                 ForEach(community.dashboard.incomingRequests) { request in
                     RequestRow(request: request) { accept in
-                        Task { await community.respondToFriendRequest(id: request.id, accept: accept) }
+                        Task {
+                                await community.respondToFriendRequest(id: request.id, accept: accept)
+                                if accept { ToastService.shared.friendAccepted() }
+                                else      { ToastService.shared.friendDeclined() }
+                            }
                     }
                 }
 
@@ -195,6 +209,52 @@ struct CommunityView: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    private var leaderboardSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionHeader(title: "Leaderboard")
+                Spacer()
+                NavigationLink {
+                    LeaderboardView()
+                } label: {
+                    Text("See all")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DesignSystem.royalBlue)
+                }
+            }
+
+            NavigationLink {
+                LeaderboardView()
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(DesignSystem.pastoralGold.opacity(0.14))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(DesignSystem.pastoralGold)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("View friend rankings")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(DesignSystem.ink)
+                        Text("Compare Scripture accuracy with friends")
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesignSystem.slate600)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DesignSystem.slate400)
+                }
+                .padding(14)
+                .cardStyle()
+            }
+            .buttonStyle(.plain)
         }
     }
 

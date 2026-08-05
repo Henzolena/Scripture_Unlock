@@ -131,6 +131,10 @@ extension View {
     func cardStyle() -> some View { modifier(CardStyle()) }
 }
 
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
 // MARK: - AppAppearance
 
 enum AppAppearance {

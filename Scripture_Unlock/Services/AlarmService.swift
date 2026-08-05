@@ -40,6 +40,9 @@ final class AlarmService: NSObject {
     var activeAlarm: Alarm?
     /// Whether the app has been granted notification permission.
     var hasNotificationPermission = false
+    /// True when the active alarm was triggered via AlarmKit (system already rang it;
+    /// RingingView should skip in-app audio).
+    var alarmTriggeredByAlarmKit = false
 
     private var activeNotificationId: String?
 
@@ -67,6 +70,9 @@ final class AlarmService: NSObject {
         let granted = try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge])
         await MainActor.run { hasNotificationPermission = granted ?? false }
+        if #available(iOS 26, *) {
+            _ = await requestAlarmKitAuthorization()
+        }
     }
 
     // MARK: - Audio engine (synthesised alarm tone, no audio file needed)
@@ -254,28 +260,41 @@ final class AlarmService: NSObject {
 
     // MARK: - Re-engagement (fires when user backs out of alarm screen)
 
-    /// Schedule a loud pull-back notification 4 seconds from now.
-    /// Called by RootView's scenePhase observer when the app is backgrounded
-    /// while an alarm is active.
+    /// Schedules three escalating notifications after the user backgrounds
+    /// the app mid-alarm. Each fires independently so even if the user
+    /// dismisses the first two, the third still pulls them back.
     func scheduleReengagementNotification() {
-        let content = UNMutableNotificationContent()
-        content.title            = "\u{1F514} Alarm still ringing!"
-        content.body             = "Return to Scripture Unlock to answer your verses."
-        content.sound            = .default
-        content.interruptionLevel = .timeSensitive
-
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 4, repeats: false)
-        let request = UNNotificationRequest(
-            identifier: "reengagement",
-            content:    content,
-            trigger:    trigger
-        )
-        UNUserNotificationCenter.current().add(request)
+        let escalation: [(TimeInterval, String)] = [
+            (4,   "Return to Scripture Unlock to answer your verses."),
+            (45,  "Your alarm is still going. Answer your Bible verses to silence it."),
+            (180, "Still haven't finished? Your devotion verses are waiting.")
+        ]
+        for (i, (delay, body)) in escalation.enumerated() {
+            let content = UNMutableNotificationContent()
+            content.title             = "\u{1F514} Alarm still ringing!"
+            content.body              = body
+            content.sound             = .default
+            content.interruptionLevel = .timeSensitive
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: "reengagement-\(i)",
+                content:    content,
+                trigger:    trigger
+            )
+            UNUserNotificationCenter.current().add(request)
+        }
     }
 
     func cancelReengagementNotification() {
         UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: ["reengagement"])
+            .removePendingNotificationRequests(withIdentifiers: ["reengagement-0", "reengagement-1", "reengagement-2"])
+    }
+
+    /// Restarts alarm audio when the app returns to foreground while an alarm
+    /// is active but audio was not playing (e.g. backgrounded before audio started).
+    func restartAlarmAudioIfNeeded() {
+        guard activeAlarm != nil, !isAlarmAudioActive else { return }
+        startAlarmAudio()
     }
 
     // MARK: - Scheduling
@@ -317,10 +336,19 @@ final class AlarmService: NSObject {
                 try await center.add(request)
             }
         }
+
+        // iOS 26+: additionally schedule a system-level AlarmKit alarm that
+        // wakes the screen, plays through silent mode, and shows a fullscreen UI.
+        if #available(iOS 26, *) { await scheduleWithAlarmKit(alarm) }
     }
 
     func rescheduleAll(_ alarms: [Alarm]) async {
         for alarm in alarms where alarm.isEnabled {
+            // Reset the snooze penalty unless this alarm is currently ringing —
+            // resetting mid-quiz would change the question count under the user.
+            if alarm.id != activeAlarm?.id {
+                alarm.snoozeCountToday = 0
+            }
             try? await schedule(alarm)
         }
     }
@@ -328,6 +356,7 @@ final class AlarmService: NSObject {
     func cancel(_ alarm: Alarm) async {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: allIdentifiers(for: alarm))
+        if #available(iOS 26, *) { cancelWithAlarmKit(alarm) }
     }
 
     /// Called by TriviaViewModel after all correct answers — fully silences the alarm.
@@ -340,9 +369,21 @@ final class AlarmService: NSObject {
         if let nid = activeNotificationId { ids.append(nid) }
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
 
+        // Capture before reset — used below to decide whether to restore repeat schedule
+        let hadSnooze = alarm.snoozeCountToday > 0
+
         await MainActor.run {
-            activeAlarm          = nil
-            activeNotificationId = nil
+            alarm.snoozeCountToday   = 0  // Reset daily penalty for next ring
+            activeAlarm              = nil
+            activeNotificationId     = nil
+            alarmTriggeredByAlarmKit = false
+        }
+
+        // If snooze was used, AlarmKit's original repeating schedule was replaced by a
+        // one-shot .fixed alarm. Restore the regular repeat schedule now that the quiz
+        // is complete so the alarm fires correctly next time.
+        if hadSnooze, #available(iOS 26, *) {
+            await scheduleWithAlarmKit(alarm)
         }
     }
 

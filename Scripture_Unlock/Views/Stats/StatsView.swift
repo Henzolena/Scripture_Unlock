@@ -3,6 +3,7 @@ import SwiftData
 
 struct StatsView: View {
     @Query(sort: \StreakEntry.date, order: .reverse) private var entries: [StreakEntry]
+    @Environment(AchievementService.self) private var achievementService
 
     private var currentStreak: Int {
         var count = 0; var d = Calendar.current.startOfDay(for: Date())
@@ -94,11 +95,33 @@ struct StatsView: View {
 
                     recentVerses.padding(.top, 22)
 
-                    Spacer(minLength: 32)
+                    achievementsSection.padding(.top, 22)
+
+                    Spacer(minLength: 100)
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    // MARK: - Achievements section
+
+    private var totalCorrect: Int { entries.reduce(0) { $0 + $1.questionsCorrect } }
+
+    private var achievementsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Achievements").padding(.horizontal, 20)
+            AchievementsView()
+                .padding(.horizontal, 20)
+        }
+        .task {
+            await achievementService.load()
+            let ctx = AchievementContext(
+                streak:       currentStreak,
+                totalCorrect: totalCorrect
+            )
+            await achievementService.check(ctx)
         }
     }
 

@@ -1,9 +1,13 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct SettingsView: View {
     @Query private var profiles: [UserProfile]
     @Environment(SupabaseService.self) private var supabase
+    @State private var pushService = PushNotificationService.shared
+    @State private var showPrivacy = false
+    @State private var showTerms   = false
 
     private var profile: UserProfile? { profiles.first }
 
@@ -16,11 +20,13 @@ struct SettingsView: View {
                     scriptureSection
                     alarmSection
                     accountSection
+                    notificationsSection
+                    legalSection
                     appFooter
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
-                .padding(.bottom, 34)
+                .padding(.bottom, 100)
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
@@ -163,6 +169,90 @@ struct SettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var notificationsSection: some View {
+        settingsSection("Notifications") {
+            HStack(spacing: 12) {
+                rowIcon("bell.badge.fill")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Push notifications")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(DesignSystem.ink)
+                    Text(pushStatusLabel)
+                        .font(.system(size: 12))
+                        .foregroundStyle(DesignSystem.slate600)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 10)
+                pushAction
+            }
+            .padding(15)
+        }
+    }
+
+    @ViewBuilder
+    private var pushAction: some View {
+        switch pushService.authorizationStatus {
+        case .notDetermined:
+            Button("Enable") { Task { await pushService.requestAndRegister() } }
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(DesignSystem.royalBlue)
+        case .denied:
+            Button("Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(DesignSystem.royalBlue)
+        default:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(DesignSystem.bethanyGreen)
+        }
+    }
+
+    private var pushStatusLabel: String {
+        switch pushService.authorizationStatus {
+        case .authorized:   return "Enabled — streak reminders and community updates"
+        case .denied:       return "Disabled — open Settings to re-enable"
+        case .provisional:  return "Provisional — some notifications active"
+        default:            return "Tap to receive morning streak reminders"
+        }
+    }
+
+    private var legalSection: some View {
+        settingsSection("Legal") {
+            Button {
+                showPrivacy = true
+            } label: {
+                navigationRow(
+                    icon: "hand.raised.fill",
+                    title: "Privacy Policy",
+                    subtitle: "How we handle your data"
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showPrivacy) {
+                PrivacyPolicyView().ignoresSafeArea()
+            }
+
+            SettingsDivider()
+
+            Button {
+                showTerms = true
+            } label: {
+                navigationRow(
+                    icon: "doc.text.fill",
+                    title: "Terms of Service",
+                    subtitle: "Usage conditions and your rights"
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showTerms) {
+                TermsOfServiceView().ignoresSafeArea()
+            }
         }
     }
 

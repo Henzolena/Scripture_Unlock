@@ -1,4 +1,5 @@
 # Secrets — NEVER commit
+.mcp.json
 Secrets.xcconfig
 *.xcconfig
 !*.xcconfig.example

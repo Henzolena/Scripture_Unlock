@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDisplayName</key>
+	<string>Scripture Unlock</string>
 	<key>GEMINI_API_KEY</key>
 	<string>$(GEMINI_API_KEY)</string>
 	<key>SUPABASE_HOST</key>
@@ -20,5 +22,7 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Scripture Unlock wakes you for your morning devotion so you can answer Bible verses before your day begins.</string>
 </dict>
 </plist>

@@ -112,7 +112,7 @@ struct BibleBookListView: View {
                     noResultsView
                 }
             }
-            .padding(.bottom, 32)
+            .padding(.bottom, 100)
         }
         .background(DesignSystem.warmCream)
     }

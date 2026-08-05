@@ -82,7 +82,7 @@ struct HomeView: View {
                             .padding(.top, 18)
                     }
 
-                    Spacer(minLength: 40)
+                    Spacer(minLength: 100)
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())
@@ -120,10 +120,11 @@ struct HomeView: View {
                         .foregroundStyle(.white.opacity(0.5))
 
                     VStack(alignment: .leading, spacing: 2) {
+                        let displayName = profile?.name.nilIfEmpty ?? "friend"
                         Text(greetingWord + ",")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(.white)
-                        Text(profile?.name ?? "friend")
+                        Text(displayName)
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(DesignSystem.pastoralGold)
                     }

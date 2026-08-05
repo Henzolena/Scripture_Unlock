@@ -89,7 +89,15 @@ struct RingingView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear  { AlarmService.shared.startAlarmAudio() }
+        .onAppear {
+            // Always restart audio here. When AlarmKit triggered the alarm, its
+            // system audio stops the moment the user slides — so by the time the
+            // app opens there is no overlap. The brief delay absorbs any edge-case
+            // transition lag from the lock-screen animation.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                AlarmService.shared.startAlarmAudio()
+            }
+        }
         .fullScreenCover(isPresented: $showTrivia) {
             TriviaContainerView(alarm: alarm)
                 .interactiveDismissDisabled(true)

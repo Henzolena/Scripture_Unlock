@@ -18,64 +18,60 @@ struct BibleReaderView: View {
     @State private var isLoading:       Bool = true
     @State private var fetchFailed:     Bool = false
     @State private var copiedVerse:     Int? = nil
-    @State private var showCopiedBanner = false
     @State private var practiceTarget:  PracticeTarget? = nil
     /// The verse currently glowing — set after load, cleared after animation.
     @State private var glowingVerse:    Int? = nil
+    @State private var noteTarget:      VerseNoteTarget? = nil
 
     /// Shared player — owned by BibleView, injected via .environment(audioPlayer).
     @Environment(BibleAudioPlayer.self) private var audio
+    @Environment(BookmarkService.self)  private var bookmarkService
 
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    if isLoading {
-                        placeholderRows.padding(20)
-                    } else if let ch = bibleChapter, !ch.verses.isEmpty {
-                        verseList(ch.verses)
-                            .padding(20)
-                            .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
-                    } else {
-                        errorView
-                    }
-                }
-                .background(DesignSystem.warmCream)
-                // After chapter loads, scroll to the target verse and trigger the glow
-                .onChange(of: bibleChapter) { _, ch in
-                    guard let target = highlightVerse, ch != nil else { return }
-                    Task { @MainActor in
-                        // Brief wait for layout to complete before scrolling
-                        try? await Task.sleep(for: .milliseconds(300))
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            proxy.scrollTo(target, anchor: .center)
-                        }
-                        // Delay glow slightly so the scroll settles first
-                        try? await Task.sleep(for: .milliseconds(400))
-                        withAnimation(.easeIn(duration: 0.35)) { glowingVerse = target }
-                        // Hold the highlight for 2.5 seconds then fade out
-                        try? await Task.sleep(for: .seconds(2.5))
-                        withAnimation(.easeOut(duration: 0.6)) { glowingVerse = nil }
-                    }
+        ScrollViewReader { proxy in
+            ScrollView {
+                if isLoading {
+                    placeholderRows.padding(20)
+                } else if let ch = bibleChapter, !ch.verses.isEmpty {
+                    verseList(ch.verses)
+                        .padding(20)
+                        .padding(.bottom, audio.isAvailable || audio.isLoading ? 110 : 60)
+                } else {
+                    errorView
                 }
             }
-
-            // ── Copy confirmation banner ─────────────────────────────────────
-            if showCopiedBanner {
-                copiedBanner
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    // Float above the persistent audio bar when it's visible
-                    .padding(.bottom, audio.isAvailable ? 116 : 16)
+            .background(DesignSystem.warmCream)
+            .onChange(of: bibleChapter) { _, ch in
+                guard let target = highlightVerse, ch != nil else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    withAnimation(.easeIn(duration: 0.35)) { glowingVerse = target }
+                    try? await Task.sleep(for: .seconds(2.5))
+                    withAnimation(.easeOut(duration: 0.6)) { glowingVerse = nil }
+                }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: showCopiedBanner)
         .sheet(item: $practiceTarget) { target in
             VerseQuizSheet(target: target)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
+        }
+        .sheet(item: $noteTarget) { target in
+            VerseNoteSheet(
+                verseRef: target.verseRef, book: target.book,
+                chapter: target.chapter, verse: target.verse,
+                verseText: target.verseText
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
         }
         .background(DesignSystem.warmCream)
         .navigationTitle("\(book.englishName) \(chapter)")
@@ -100,7 +96,7 @@ struct BibleReaderView: View {
             }
         }
         .task {
-            // Load verse text and audio in parallel.
+            // Load verse text, audio, and bookmarks in parallel.
             // Audio will keep playing even after navigating away from this view.
             async let textLoad: () = loadChapter()
             async let audioLoad: () = audio.load(
@@ -109,7 +105,8 @@ struct BibleReaderView: View {
                 bookName: book.englishName,
                 chapter:  chapter
             )
-            _ = await (textLoad, audioLoad)
+            async let bookmarkLoad: () = bookmarkService.load()
+            _ = await (textLoad, audioLoad, bookmarkLoad)
         }
         // No onDisappear stop — audio lives in the environment and persists
     }
@@ -120,11 +117,36 @@ struct BibleReaderView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             chapterHeader
             ForEach(verses, id: \.verse) { verse in
+                let ref = "\(book.englishName) \(chapter):\(verse.verse)"
                 VerseRow(
                     verse:         verse,
                     isCopied:      copiedVerse == verse.verse,
                     isHighlighted: glowingVerse == verse.verse,
-                    onCopy:        { copyVerse(verse) }
+                    isBookmarked:  bookmarkService.isBookmarked(ref),
+                    onCopy:        { copyVerse(verse) },
+                    onBookmark: {
+                        Task {
+                            let wasBookmarked = bookmarkService.isBookmarked(ref)
+                            await bookmarkService.toggle(
+                                verseRef: ref, book: book.englishName,
+                                chapter: chapter, verse: verse.verse,
+                                text: verse.text,
+                                translation: language == "en" ? "NIV" : language
+                            )
+                            if wasBookmarked {
+                                ToastService.shared.unbookmarked()
+                            } else {
+                                ToastService.shared.bookmarked()
+                            }
+                        }
+                    },
+                    onNote: {
+                        noteTarget = VerseNoteTarget(
+                            verseRef: ref, book: book.englishName,
+                            chapter: chapter, verse: verse.verse,
+                            verseText: verse.text
+                        )
+                    }
                 )
                 .id(verse.verse)   // anchor for ScrollViewReader.scrollTo
             }
@@ -209,23 +231,6 @@ struct BibleReaderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Copied banner
-
-    private var copiedBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(DesignSystem.bethanyGreen)
-            Text("Verse copied")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(DesignSystem.ink)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(DesignSystem.surface)
-        .cornerRadius(24)
-        .shadow(color: DesignSystem.shadow1, radius: 12, x: 0, y: 4)
-    }
-
     // MARK: - Helpers
 
     private func loadChapter() async {
@@ -241,21 +246,30 @@ struct BibleReaderView: View {
     private func copyVerse(_ verse: EthiopianVerse) {
         UIPasteboard.general.string = "\(book.englishName) \(chapter):\(verse.verse) — \(verse.text)"
         copiedVerse = verse.verse
-        withAnimation { showCopiedBanner = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            withAnimation { showCopiedBanner = false }
-            copiedVerse = nil
-        }
+        ToastService.shared.verseCopied()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedVerse = nil }
     }
 }
 
 // MARK: - Verse row
 
+private struct VerseNoteTarget: Identifiable {
+    var id: String { verseRef }
+    let verseRef:  String
+    let book:      String
+    let chapter:   Int
+    let verse:     Int
+    let verseText: String
+}
+
 private struct VerseRow: View {
     let verse:         EthiopianVerse
     let isCopied:      Bool
     var isHighlighted: Bool = false
+    var isBookmarked:  Bool = false
     let onCopy:        () -> Void
+    let onBookmark:    () -> Void
+    let onNote:        () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -297,7 +311,20 @@ private struct VerseRow: View {
                     lineWidth: 1.5)
         )
         .contentShape(Rectangle())
-        .onLongPressGesture(minimumDuration: 0.4) { onCopy() }
+        .contextMenu {
+            Button { onCopy() } label: {
+                Label("Copy verse", systemImage: "doc.on.doc.fill")
+            }
+            Button { onBookmark() } label: {
+                Label(
+                    isBookmarked ? "Remove bookmark" : "Bookmark verse",
+                    systemImage: isBookmarked ? "bookmark.slash.fill" : "bookmark.fill"
+                )
+            }
+            Button { onNote() } label: {
+                Label("Personal note", systemImage: "pencil.line")
+            }
+        }
         .animation(.easeInOut(duration: 0.35), value: isHighlighted)
         .animation(.easeInOut(duration: 0.2),  value: isCopied)
     }

@@ -51,7 +51,7 @@ struct PacksView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
 
-                    Spacer(minLength: 32)
+                    Spacer(minLength: 100)
                 }
             }
             .background(DesignSystem.warmCream.ignoresSafeArea())

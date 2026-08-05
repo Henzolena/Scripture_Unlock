@@ -1,0 +1,175 @@
+import AlarmKit
+import AppIntents
+import SwiftUI
+
+// The app's SwiftData model is also named 'Alarm', so we alias AlarmKit's Alarm
+// to avoid ambiguity everywhere in this file.
+private typealias AKAlarm = AlarmKit.Alarm
+
+@available(iOS 26, *)
+extension AlarmService {
+
+    // MARK: - Authorization
+
+    func requestAlarmKitAuthorization() async -> Bool {
+        switch AlarmManager.shared.authorizationState {
+        case .notDetermined:
+            let state = try? await AlarmManager.shared.requestAuthorization()
+            return state == .authorized
+        case .authorized:
+            return true
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Schedule
+
+    /// Schedules an alarm via AlarmKit.
+    /// - Parameters:
+    ///   - alarm: The SwiftData alarm to schedule.
+    ///   - snoozeFireDate: When non-nil, schedules a one-shot snooze at this exact date
+    ///     instead of computing the next regular fire date. Bypasses the `isEnabled`
+    ///     and `nextActualFireDate` checks since the alarm is already active.
+    func scheduleWithAlarmKit(_ alarm: Alarm, snoozeFireDate: Date? = nil) async {
+        guard await requestAlarmKitAuthorization() else { return }
+
+        // cancel() is synchronous in AlarmKit — not async
+        try? AlarmManager.shared.cancel(id: alarm.id)
+
+        let fireDate: Date
+        if let snooze = snoozeFireDate {
+            fireDate = snooze
+        } else {
+            guard alarm.isEnabled, let d = alarm.nextActualFireDate else { return }
+            fireDate = d
+        }
+
+        let h24 = alarm.isAM ? alarm.hour : alarm.hour + 12
+
+        // Lock-screen button label for the secondary (snooze) action.
+        // The primary stop action uses the system default dismiss UI (iOS 26.1+).
+        let snoozeButton = AlarmButton(
+            text: "Snooze (+1 question)",
+            textColor: .white,
+            systemImageName: "clock"
+        )
+
+        let alert = AlarmPresentation.Alert(
+            title: LocalizedStringResource(stringLiteral: alarm.label),
+            secondaryButton: snoozeButton,
+            secondaryButtonBehavior: .custom
+        )
+
+        let metadata = ScriptureAlarmMetadata(
+            alarmId: alarm.id.uuidString,
+            label: alarm.label,
+            questionCount: alarm.effectiveQuestionCount,  // includes any snooze penalty
+            packId: alarm.packId,
+            difficultyRaw: alarm.difficultyRaw,
+            translationRaw: alarm.translationRaw
+        )
+
+        let attributes = AlarmAttributes(
+            presentation: AlarmPresentation(alert: alert),
+            metadata: metadata,
+            tintColor: Color(red: 0.85, green: 0.68, blue: 0.27)
+        )
+
+        // Build the schedule. Snooze is always one-shot (.fixed) regardless of
+        // repeat days — it fires once at the snooze time, then the normal repeat
+        // schedule resumes on the next regular alarm trigger.
+        let schedule: AKAlarm.Schedule
+        if snoozeFireDate != nil || alarm.repeatDays.isEmpty {
+            schedule = .fixed(fireDate)
+        } else {
+            let time = AKAlarm.Schedule.Relative.Time(hour: h24, minute: alarm.minute)
+            let weekdays: [Locale.Weekday] = alarm.repeatDays.compactMap { day in
+                switch day {
+                case 0: return .sunday
+                case 1: return .monday
+                case 2: return .tuesday
+                case 3: return .wednesday
+                case 4: return .thursday
+                case 5: return .friday
+                case 6: return .saturday
+                default: return nil
+                }
+            }
+            let recurrence = AKAlarm.Schedule.Relative.Recurrence.weekly(weekdays)
+            schedule = .relative(AKAlarm.Schedule.Relative(time: time, repeats: recurrence))
+        }
+
+        // Intents go on the configuration — AlarmButton is visual only
+        let startIntent = StartDevotionIntent(alarmId: alarm.id.uuidString)
+        let snoozeIntent = SnoozeAlarmIntent(alarmId: alarm.id.uuidString)
+
+        let config = AlarmManager.AlarmConfiguration.alarm(
+            schedule: schedule,
+            attributes: attributes,
+            stopIntent: startIntent,
+            secondaryIntent: snoozeIntent
+        )
+
+        _ = try? await AlarmManager.shared.schedule(id: alarm.id, configuration: config)
+        print("[AlarmKit] Scheduled '\(alarm.label)' → \(fireDate)")
+    }
+
+    // MARK: - Cancel (synchronous in AlarmKit)
+
+    func cancelWithAlarmKit(_ alarm: Alarm) {
+        try? AlarmManager.shared.cancel(id: alarm.id)
+    }
+
+    // MARK: - Handle foreground entry after AlarmKit dismissal
+
+    /// Called when the scene becomes active. Reads UserDefaults keys written by
+    /// StartDevotionIntent / SnoozeAlarmIntent and activates the matching alarm.
+    ///
+    /// Processing order matters: handle snooze FIRST. The background in-process timer
+    /// and AlarmKit fire simultaneously, so `activeAlarm` may already be set (and the
+    /// in-app notification may already say "N verses") when the snooze intent arrives.
+    /// We must clear that stale state so the user gets their requested rest period.
+    func checkPendingAlarmKitAlarm(alarms: [Alarm]) {
+
+        // STEP 1 — User tapped "Snooze (+1 question)" on the lock screen.
+        if let snoozedId = UserDefaults.standard.string(forKey: "snoozedAlarmKitAlarmId"),
+           let alarm = alarms.first(where: { $0.id.uuidString == snoozedId }) {
+
+            UserDefaults.standard.removeObject(forKey: "snoozedAlarmKitAlarmId")
+            // Also clear the stop key for the same alarm — user chose snooze, not stop.
+            if UserDefaults.standard.string(forKey: "pendingAlarmKitAlarmId") == alarm.id.uuidString {
+                UserDefaults.standard.removeObject(forKey: "pendingAlarmKitAlarmId")
+            }
+
+            alarm.snoozeCountToday += 1
+            // Reschedule to ring again in exactly 5 minutes (not tomorrow's regular time)
+            let snoozeFireDate = Date(timeIntervalSinceNow: 5 * 60)
+            Task { await scheduleWithAlarmKit(alarm, snoozeFireDate: snoozeFireDate) }
+
+            // Respect the snooze choice: if the background timer fired simultaneously
+            // and already set activeAlarm (showing the quiz), clear it. Remove the stale
+            // "N verses" notification that was posted before the count incremented.
+            if activeAlarm?.id == alarm.id {
+                stopAlarmAudio()
+                UNUserNotificationCenter.current().removeDeliveredNotifications(
+                    withIdentifiers: ["alarm-fire-\(alarm.id.uuidString)"]
+                )
+                activeAlarm = nil
+                alarmTriggeredByAlarmKit = false
+            }
+
+            // Do not process pendingAlarmKitAlarmId this session — user chose to rest.
+            return
+        }
+
+        // STEP 2 — User slid to stop the lock-screen alarm; show the quiz.
+        guard activeAlarm == nil else { return }
+        if let pendingId = UserDefaults.standard.string(forKey: "pendingAlarmKitAlarmId"),
+           let alarm = alarms.first(where: { $0.id.uuidString == pendingId }) {
+            UserDefaults.standard.removeObject(forKey: "pendingAlarmKitAlarmId")
+            alarmTriggeredByAlarmKit = true
+            activeAlarm = alarm
+        }
+    }
+}
