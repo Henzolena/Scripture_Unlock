@@ -44,7 +44,7 @@ Deno.serve(async (req)=>{
   try {
     const { userId, title, body, data = {} } = await req.json();
     const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
-    const { data: tokens, error } = await supabase.from('device_tokens').select('token, environment').eq('user_id', userId).eq('platform', 'ios');
+    const { data: tokens, error } = await supabase.from('device_tokens').select('id, token, environment').eq('user_id', userId).eq('platform', 'ios');
     if (error || !tokens?.length) {
       return new Response(JSON.stringify({
         sent: 0
@@ -64,7 +64,9 @@ Deno.serve(async (req)=>{
       const env = environment ?? (APNS_PRODUCTION ? 'production' : 'sandbox');
       return env === 'sandbox' ? 'api.sandbox.push.apple.com' : 'api.push.apple.com';
     };
-    const results = await Promise.allSettled(tokens.map(async ({ token, environment })=>{
+    // Tokens APNs tells us are permanently invalid, collected for pruning below.
+    const dead = [];
+    const results = await Promise.allSettled(tokens.map(async ({ id, token, environment })=>{
       const res = await fetch(`https://${gatewayFor(environment)}/3/device/${token}`, {
         method: 'POST',
         headers: {
@@ -90,10 +92,29 @@ Deno.serve(async (req)=>{
       // which is why broken delivery went unnoticed. Surface APNs' verdict.
       if (!res.ok) {
         const reason = await res.text().catch(()=>'');
+        // BadDeviceToken and Unregistered are permanent, not transient: the token
+        // will never be valid again. Apple's guidance is to stop using it. Without
+        // pruning, a device that reinstalls or moves between debug and TestFlight
+        // builds leaves rows that are retried on every push forever.
+        if (res.status === 410 || reason.includes('BadDeviceToken') || reason.includes('Unregistered')) {
+          dead.push(id);
+        }
         throw new Error(`APNs ${res.status} ${reason} (env=${environment ?? 'unknown'})`);
       }
       return true;
     }));
+
+    // Self-heal: drop the permanently dead tokens so the table stays honest.
+    let pruned = 0;
+    if (dead.length) {
+      const { error: pruneError } = await supabase.from('device_tokens').delete().in('id', dead);
+      if (pruneError) {
+        console.error('[send-push] prune failed:', pruneError.message);
+      } else {
+        pruned = dead.length;
+        console.log(`[send-push] pruned ${pruned} dead token(s)`);
+      }
+    }
     const sent = results.filter((r)=>r.status === 'fulfilled').length;
     const failures = results.filter((r)=>r.status === 'rejected').map((r)=>String(r.reason?.message ?? r.reason));
     if (failures.length) console.error('[send-push] failures:', failures);
@@ -102,6 +123,7 @@ Deno.serve(async (req)=>{
     return new Response(JSON.stringify({
       sent,
       failed: failures.length,
+      pruned,
       errors: failures
     }), {
       headers: {
