@@ -42,20 +42,10 @@ struct StartDevotionIntent: LiveActivityIntent {
 
 struct SnoozeAlarmIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Snooze"
-    // KNOWN UX WART, deliberately left as-is for now: tapping snooze foregrounds
-    // the app, which is the opposite of what a snoozing user wants.
-    //
-    // It cannot simply be flipped to false. All the snooze work — incrementing
-    // snoozeCountToday and rescheduling both AlarmKit and the notification
-    // fallback — currently happens in checkPendingAlarmKitAlarm(), which only runs
-    // when the app becomes active. With this false, the intent would write its
-    // UserDefaults key and nothing would reschedule, so the snooze would never
-    // ring at all. Silently oversleeping is far worse than an app launch.
-    //
-    // Proper fix: move the reschedule into perform() so it runs without the app
-    // foregrounding. That needs on-device verification against an approved
-    // AlarmKit entitlement, which is still pending.
-    static var openAppWhenRun: Bool { true }
+    // Does NOT foreground the app. Someone tapping snooze wants to put the phone
+    // down, so perform() arms the next ring itself rather than depending on the
+    // app becoming active.
+    static var openAppWhenRun: Bool { false }
     static var isDiscoverable: Bool { false }
 
     @Parameter(title: "Alarm ID")
@@ -65,6 +55,16 @@ struct SnoozeAlarmIntent: LiveActivityIntent {
     init(alarmId: String) { self.alarmId = alarmId }
 
     func perform() async throws -> some IntentResult {
+        // Charge the +1 question penalty later — SwiftData is not reachable here,
+        // so bank it and let the app apply it on next launch.
+        AlarmService.recordPendingSnooze(alarmId)
+
+        // Arm the next ring now. This is the part that must not depend on the app
+        // launching: it works with no AlarmKit authorization and no foreground.
+        await AlarmService.scheduleSnoozeNotificationFromIntent(alarmId: alarmId)
+
+        // Still record the id so the app can upgrade the pending snooze to a real
+        // AlarmKit alarm (lock-screen UI) if it happens to open before it fires.
         UserDefaults.standard.set(alarmId, forKey: "snoozedAlarmKitAlarmId")
         return .result()
     }

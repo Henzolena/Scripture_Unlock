@@ -461,7 +461,73 @@ final class AlarmService: NSObject {
     }
 
     func snoozeIdentifier(for alarm: Alarm) -> String {
-        "snooze-\(alarm.id.uuidString)"
+        Self.snoozeIdentifier(forAlarmId: alarm.id.uuidString)
+    }
+
+    static func snoozeIdentifier(forAlarmId id: String) -> String { "snooze-\(id)" }
+
+    // MARK: - Snooze support for AppIntents (no SwiftData available)
+
+    /// UserDefaults keys shared with SnoozeAlarmIntent, which runs without access
+    /// to the SwiftData store.
+    enum SnoozeKeys {
+        // nonisolated so SnoozeAlarmIntent can build keys off the main actor.
+        nonisolated static func pendingCount(_ id: String) -> String { "snoozePendingCount-\(id)" }
+        nonisolated static func fireDate(_ id: String)     -> String { "snoozeFireDate-\(id)" }
+        nonisolated static func meta(_ id: String)         -> String { "alarmMeta-\(id)" }
+    }
+
+    /// Caches the details SnoozeAlarmIntent needs to build a notification on its
+    /// own. Written whenever an alarm is scheduled.
+    static func cacheAlarmMetadata(_ alarm: Alarm) {
+        UserDefaults.standard.set([
+            "label": alarm.label,
+            "tone":  alarm.toneIdentifier,
+            "count": alarm.effectiveQuestionCount
+        ], forKey: SnoozeKeys.meta(alarm.id.uuidString))
+    }
+
+    /// Schedules the snooze notification directly from an AppIntent.
+    ///
+    /// The intent cannot reach SwiftData, so it works from the cached metadata.
+    /// This is what makes the snooze reliable without foregrounding the app: the
+    /// notification is armed the moment the user taps snooze, independent of
+    /// AlarmKit authorization and of whether the app ever launches.
+    static func scheduleSnoozeNotificationFromIntent(alarmId: String, minutes: Double = 5) async {
+        let meta   = UserDefaults.standard.dictionary(forKey: SnoozeKeys.meta(alarmId)) ?? [:]
+        let label  = meta["label"] as? String ?? "Alarm"
+        let toneId = meta["tone"]  as? String ?? AlarmTone.all[0].id
+        // +1 for the snooze being taken right now, which has not been charged yet.
+        let count  = (meta["count"] as? Int ?? 3) + pendingSnoozeCount(alarmId) + 1
+
+        let fireDate = Date(timeIntervalSinceNow: minutes * 60)
+        UserDefaults.standard.set(fireDate, forKey: SnoozeKeys.fireDate(alarmId))
+
+        let content = UNMutableNotificationContent()
+        content.title             = "⏰ \(label)"
+        content.body              = "Snooze over — answer \(count) verses to silence the alarm."
+        content.sound             = AlarmTone.find(id: toneId).notificationSound
+        content.interruptionLevel = .timeSensitive
+        content.userInfo          = ["alarmId": alarmId, "alarmLabel": label, "fromSnooze": true]
+
+        let request = UNNotificationRequest(
+            identifier: snoozeIdentifier(forAlarmId: alarmId),
+            content:    content,
+            trigger:    UNTimeIntervalNotificationTrigger(timeInterval: minutes * 60, repeats: false)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+        print("[AlarmService] Snooze armed from intent: \(Int(minutes)) min, \(count) verses")
+    }
+
+    // nonisolated: called from SnoozeAlarmIntent.perform(), which is not on the
+    // main actor. These only touch UserDefaults, which is thread-safe.
+    nonisolated static func pendingSnoozeCount(_ alarmId: String) -> Int {
+        UserDefaults.standard.integer(forKey: SnoozeKeys.pendingCount(alarmId))
+    }
+
+    nonisolated static func recordPendingSnooze(_ alarmId: String) {
+        UserDefaults.standard.set(pendingSnoozeCount(alarmId) + 1,
+                                  forKey: SnoozeKeys.pendingCount(alarmId))
     }
 
     /// Called by TriviaViewModel after all correct answers — fully silences the alarm.

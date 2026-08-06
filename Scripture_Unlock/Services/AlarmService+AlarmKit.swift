@@ -111,6 +111,11 @@ extension AlarmService {
         )
 
         _ = try? await AlarmManager.shared.schedule(id: alarm.id, configuration: config)
+
+        // SnoozeAlarmIntent runs without SwiftData, so leave it what it needs to
+        // build the snooze notification on its own.
+        AlarmService.cacheAlarmMetadata(alarm)
+
         print("[AlarmKit] Scheduled '\(alarm.label)' → \(fireDate)")
     }
 
@@ -175,41 +180,54 @@ extension AlarmService {
     /// We must clear that stale state so the user gets their requested rest period.
     func checkPendingAlarmKitAlarm(alarms: [Alarm]) {
 
-        // STEP 1 — User tapped "Snooze (+1 question)" on the lock screen.
+        // STEP 1 — Reconcile any snoozes taken on the lock screen.
+        //
+        // SnoozeAlarmIntent already armed the next ring itself, so this must never
+        // schedule a *new* snooze window. Doing so was the trap that made
+        // openAppWhenRun=false unsafe: the intent's own notification opens the app,
+        // which would see the leftover key and push the alarm out another 5 minutes,
+        // forever. Here we only charge the banked penalty and, if the snooze has not
+        // fired yet, upgrade it to a real AlarmKit alarm for the lock-screen UI.
         if let snoozedId = UserDefaults.standard.string(forKey: "snoozedAlarmKitAlarmId"),
            let alarm = alarms.first(where: { $0.id.uuidString == snoozedId }) {
 
+            let idString = alarm.id.uuidString
             UserDefaults.standard.removeObject(forKey: "snoozedAlarmKitAlarmId")
-            // Also clear the stop key for the same alarm — user chose snooze, not stop.
-            if UserDefaults.standard.string(forKey: "pendingAlarmKitAlarmId") == alarm.id.uuidString {
-                UserDefaults.standard.removeObject(forKey: "pendingAlarmKitAlarmId")
+
+            // Apply every snooze the intent banked while the app was closed.
+            let pending = AlarmService.pendingSnoozeCount(idString)
+            if pending > 0 {
+                alarm.snoozeCountToday += pending
+                UserDefaults.standard.removeObject(forKey: AlarmService.SnoozeKeys.pendingCount(idString))
+                AlarmService.cacheAlarmMetadata(alarm)   // keep the cached count honest
             }
 
-            alarm.snoozeCountToday += 1
-            // Reschedule to ring again in exactly 5 minutes (not tomorrow's regular time)
-            let snoozeFireDate = Date(timeIntervalSinceNow: 5 * 60)
-            Task {
-                await scheduleWithAlarmKit(alarm, snoozeFireDate: snoozeFireDate)
-                // Belt-and-braces: also arm a plain notification. If AlarmKit
-                // authorization is unavailable, scheduleWithAlarmKit returns early
-                // and the snooze would otherwise never ring again.
-                await scheduleSnoozeFallback(for: alarm, fireDate: snoozeFireDate)
+            let snoozeFireDate = UserDefaults.standard.object(
+                forKey: AlarmService.SnoozeKeys.fireDate(idString)) as? Date
+
+            // Only touch the schedule while the snooze is still in the future.
+            if let fireDate = snoozeFireDate, fireDate > Date() {
+                // Also clear the stop key — the user chose snooze, not stop.
+                if UserDefaults.standard.string(forKey: "pendingAlarmKitAlarmId") == idString {
+                    UserDefaults.standard.removeObject(forKey: "pendingAlarmKitAlarmId")
+                }
+                Task { await scheduleWithAlarmKit(alarm, snoozeFireDate: fireDate) }
+
+                // If the in-process timer fired simultaneously and put the quiz on
+                // screen, respect the snooze and take it back down.
+                if activeAlarm?.id == alarm.id {
+                    stopAlarmAudio()
+                    UNUserNotificationCenter.current().removeDeliveredNotifications(
+                        withIdentifiers: ["alarm-fire-\(idString)"]
+                    )
+                    activeAlarm = nil
+                    alarmTriggeredByAlarmKit = false
+                }
+                return   // resting until the snooze fires
             }
 
-            // Respect the snooze choice: if the background timer fired simultaneously
-            // and already set activeAlarm (showing the quiz), clear it. Remove the stale
-            // "N verses" notification that was posted before the count incremented.
-            if activeAlarm?.id == alarm.id {
-                stopAlarmAudio()
-                UNUserNotificationCenter.current().removeDeliveredNotifications(
-                    withIdentifiers: ["alarm-fire-\(alarm.id.uuidString)"]
-                )
-                activeAlarm = nil
-                alarmTriggeredByAlarmKit = false
-            }
-
-            // Do not process pendingAlarmKitAlarmId this session — user chose to rest.
-            return
+            // Snooze already elapsed: fall through so the alarm can present.
+            UserDefaults.standard.removeObject(forKey: AlarmService.SnoozeKeys.fireDate(idString))
         }
 
         // STEP 2 — User slid to stop the lock-screen alarm; show the quiz.
