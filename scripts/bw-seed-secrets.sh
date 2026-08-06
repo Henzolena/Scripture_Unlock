@@ -30,9 +30,9 @@ if bw get item "$ITEM_NAME" --session "$BW_SESSION" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Only these three reach the app — Scripture-Unlock-Info.plist maps exactly these
+# Only these reach the app — Scripture-Unlock-Info.plist maps exactly these
 # into the bundle. Anything else in the xcconfig is inert at runtime.
-KEYS=(SUPABASE_HOST SUPABASE_ANON_KEY GEMINI_API_KEY)
+KEYS=(SUPABASE_HOST SUPABASE_ANON_KEY)
 
 echo "Reading values from $XCCONFIG"
 PAYLOAD=$(python3 - "$XCCONFIG" "$ITEM_NAME" "${KEYS[@]}" <<'PY'

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - QuestionGeneratorAgent
 //
-// Orchestrates dynamic trivia-question generation using Gemini.
+// Orchestrates dynamic trivia-question generation via the Railway API.
 //
 // Flow
 // ────
@@ -10,12 +10,13 @@ import Foundation
 //  2. Agent checks its disk cache first.
 //  3. If the cache is low (< minCacheThreshold), it triggers an async
 //     background generation without blocking the caller.
-//  4. Generated questions are validated against the Ethiopian Bible API
-//     (verse ref + text sanity check) before being added to the cache.
-//  5. On the NEXT alarm the validated questions are available immediately.
+//  4. The backend has already run each question through the centralised
+//     content gate (app/ai): grounding, safety screening, model review.
+//     The client only re-checks structure, which needs no network.
+//  5. On the NEXT alarm the questions are available immediately.
 //
 // The current alarm session ALWAYS gets questions from the cache or the
-// static fallback — Gemini latency never blocks alarm dismissal.
+// bundled offline floor — generation latency never blocks alarm dismissal.
 
 @Observable
 final class QuestionGeneratorAgent {
@@ -29,7 +30,7 @@ final class QuestionGeneratorAgent {
 
     /// Start background generation when fewer than this many questions remain.
     private let minCacheThreshold = 20
-    /// How many questions to request per Gemini call.
+    /// How many questions to request per generation batch.
     private let batchSize = 15
     /// Maximum cached questions per (packId, difficulty) slot.
     private let maxCacheSize = 60
@@ -86,30 +87,32 @@ final class QuestionGeneratorAgent {
 
         print("[QuestionGeneratorAgent] Generating \(targetCount) questions for \(packId)/\(difficulty.rawValue)")
 
-        // ── Priority 1: Centralized Railway API (same backend as study quiz) ──
-        let railwayQuestions = await generateViaRailwayAPI(
+        // Single source: the Railway API, which runs every question through the
+        // centralised content gate in app/ai (contract → structural validation →
+        // grounding → safety screen → model review).
+        //
+        // The on-device Gemini fallback that used to sit behind this was removed
+        // deliberately. It had its own prompt and its own weaker validation, so
+        // the quality bar silently depended on which path happened to answer —
+        // and it required shipping GEMINI_API_KEY inside the app binary, where
+        // anyone can extract it. Offline behaviour is unaffected: the disk cache
+        // and the bundled question floor already cover it, and generation always
+        // needed the network anyway to verify a verse exists.
+        let returned = await generateViaRailwayAPI(
             packId: packId, difficulty: difficulty,
             count: targetCount, excluding: usedRefs
         )
-        if !railwayQuestions.isEmpty {
-            await mergeIntoCacheAndSave(railwayQuestions, key: key)
-            print("[QuestionGeneratorAgent] Cached \(railwayQuestions.count) Railway questions for \(packId)/\(difficulty.rawValue)")
+        // Free last line of defence against a truncated or garbled response.
+        let questions = returned.filter(structurallySound)
+        if questions.count < returned.count {
+            print("[QuestionGeneratorAgent] Dropped \(returned.count - questions.count) structurally unsound question(s)")
+        }
+        guard !questions.isEmpty else {
+            print("[QuestionGeneratorAgent] Railway returned nothing for \(packId)/\(difficulty.rawValue) — cache unchanged")
             return
         }
-
-        // ── Priority 2: On-device Gemini (fallback when Railway is unavailable) ──
-        print("[QuestionGeneratorAgent] Railway returned nothing — falling back to on-device Gemini")
-        do {
-            let prompt     = buildPrompt(packId: packId, difficulty: difficulty,
-                                         exclude: usedRefs, count: targetCount)
-            let jsonString = try await GeminiService.shared.generate(prompt: prompt)
-            let raw        = try parseQuestions(from: jsonString, packId: packId, difficulty: difficulty)
-            let validated  = await validate(raw)
-            await mergeIntoCacheAndSave(validated, key: key)
-            print("[QuestionGeneratorAgent] Cached \(validated.count) Gemini questions for \(packId)/\(difficulty.rawValue)")
-        } catch {
-            print("[QuestionGeneratorAgent] Both Railway and Gemini failed: \(error.localizedDescription)")
-        }
+        await mergeIntoCacheAndSave(questions, key: key)
+        print("[QuestionGeneratorAgent] Cached \(questions.count) verified questions for \(packId)/\(difficulty.rawValue)")
     }
 
     /// Merge new questions into the cache slot and persist to disk.
@@ -368,60 +371,36 @@ final class QuestionGeneratorAgent {
         throw QuestionGeneratorError.parseError("Could not parse questions array from: \(jsonString.prefix(200))")
     }
 
-    // MARK: - Validation
+    // MARK: - Local sanity check
 
-    /// Checks each question against the Ethiopian Bible API.
-    /// A question passes if:
-    ///   1. The verse ref can be fetched from the API (it exists).
-    ///   2. The API verse text and the Gemini verse text share at least 50% of
-    ///      words — guards against hallucinated verse text without being too strict
-    ///      about ESV vs KJV translation differences.
-    private func validate(_ questions: [TriviaQuestion]) async -> [TriviaQuestion] {
-        var valid: [TriviaQuestion] = []
-        for q in questions {
-            if await isValid(q) {
-                valid.append(q)
-            } else {
-                print("[QuestionGeneratorAgent] Rejected (failed validation): \(q.verseRef)")
-            }
-        }
-        return valid
-    }
-
-    private func isValid(_ q: TriviaQuestion) async -> Bool {
-        // Basic structural checks first
+    /// A free, offline structural check on whatever the backend returned.
+    ///
+    /// The semantic guarantees now live server-side: POST /api/v1/quiz/generate
+    /// runs every question through app/ai (grounding against the passage, safety
+    /// screening, and a model review) and only returns accepted items. This used
+    /// to re-verify each verse over the network from the client, which added a
+    /// round-trip per question and made cache refills fail entirely whenever the
+    /// API was unreachable — one of the reasons the cache could drain to nothing.
+    ///
+    /// What remains is the part that is free and still worth doing: catching a
+    /// truncated or garbled response before it reaches a half-awake user.
+    private func structurallySound(_ q: TriviaQuestion) -> Bool {
         guard !q.verseRef.isEmpty,
               !q.verseText.isEmpty,
               q.options.count == 4,
               q.answerIndex >= 0,
-              q.answerIndex < q.options.count,  // guard against out-of-range crash
-              !q.options.contains(where: { $0.isEmpty })
+              q.answerIndex < q.options.count,
+              !q.options.contains(where: { $0.trimmingCharacters(in: .whitespaces).isEmpty }),
+              Set(q.options.map { $0.lowercased() }).count == q.options.count
         else { return false }
 
-        // Fill-specific: pre + post must not both be empty
-        if q.kind == .fill {
-            guard (q.fillPre?.isEmpty == false) || (q.fillPost?.isEmpty == false) else { return false }
+        switch q.kind {
+        case .mcq:
+            return !(q.prompt ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        case .fill:
+            // A fill needs context on at least one side of the blank.
+            return !(q.fillPre ?? "").isEmpty || !(q.fillPost ?? "").isEmpty
         }
-
-        // Fetch from Ethiopian Bible API (English) to verify the verse exists
-        guard let apiText = await EthiopianBibleService.shared.verse(
-            ref: q.verseRef, language: "en"
-        ) else {
-            // Verse not found → reject
-            return false
-        }
-
-        // Loose text similarity: at least 40% word overlap (handles ESV vs KJV diffs)
-        let geminiWords = Set(q.verseText.lowercased().components(separatedBy: .whitespacesAndNewlines)
-                               .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-                               .filter { !$0.isEmpty })
-        let apiWords    = Set(apiText.lowercased().components(separatedBy: .whitespacesAndNewlines)
-                               .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-                               .filter { !$0.isEmpty })
-
-        guard !geminiWords.isEmpty, !apiWords.isEmpty else { return false }
-        let overlap = Double(geminiWords.intersection(apiWords).count) / Double(geminiWords.count)
-        return overlap >= 0.40
     }
 
     // MARK: - Disk cache

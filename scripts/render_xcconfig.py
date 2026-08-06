@@ -10,10 +10,12 @@ Usage: render_xcconfig.py <item.json> <output.xcconfig>
 import json
 import sys
 
-# Only these reach the app. Scripture-Unlock-Info.plist maps exactly these three
+# Only these reach the app. GEMINI_API_KEY was removed once question generation
+# moved fully server-side — it no longer ships in the binary, where it was
+# extractable. Scripture-Unlock-Info.plist maps exactly these
 # into the bundle, and the services read them via
 # Bundle.main.object(forInfoDictionaryKey:). Anything else is inert at runtime.
-REQUIRED = ["SUPABASE_HOST", "SUPABASE_ANON_KEY", "GEMINI_API_KEY"]
+REQUIRED = ["SUPABASE_HOST", "SUPABASE_ANON_KEY"]
 
 
 def main() -> int:
