@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Auth   // for session.accessToken
 
 /// Hosts the trivia state machine — routes between MCQ, Fill, Reveal, Dismissed.
 struct TriviaContainerView: View {
@@ -90,9 +91,58 @@ struct TriviaContainerView: View {
         // Read the value captured at dismiss time — alarm.snoozeCountToday is
         // concurrently reset to zero by dismissAlarm().
         entry.snoozeCount       += vm.snoozeCountAtDismiss
-        entry.dismissedAt        = Date()
+
+        // Only a finished session counts. Previously dismissedAt was stamped
+        // whenever this screen closed, so bailing out — via the escape hatch or
+        // by silencing the alarm with questions left — scored exactly the same as
+        // answering everything, and get_friends_leaderboard counts
+        // dismissed_at IS NOT NULL as a completed session.
+        let completed = vm.completedSteps >= vm.totalSteps
+        if completed {
+            entry.dismissedAt = Date()
+        } else {
+            entry.abandonedAt = Date()
+        }
 
         Task { await supabase.upsertStreakEntry(entry) }
+
+        if !completed { notifyAccountabilityPartner(entry: entry) }
+    }
+
+    /// Tells the accountability partner the morning was abandoned.
+    ///
+    /// Opt-in by construction: it only sends when the user has actually set a
+    /// partner email. This is the part that gives up-and-quitting a real cost —
+    /// iOS will always allow the alarm to be stopped, so social accountability
+    /// does the work that force cannot.
+    private func notifyAccountabilityPartner(entry: StreakEntry) {
+        guard let profile = profiles.first else { return }
+        let partner = profile.accountabilityPartnerEmail.trimmingCharacters(in: .whitespaces)
+        guard !partner.isEmpty else { return }
+
+        let host    = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_HOST") as? String ?? ""
+        let anonKey = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? ""
+        guard let url = URL(string: "https://\(host)/functions/v1/accountability-email") else { return }
+
+        let payload: [String: Any] = [
+            "name":          profile.name.isEmpty ? "Your friend" : profile.name,
+            "partnerEmail":  partner,
+            "streak":        vm.completedSteps,
+            "accuracy":      entry.accuracy,
+            "totalAnswered": entry.questionsAnswered
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+
+        Task {
+            guard let session = try? await SupabaseService.shared.currentSession() else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.httpBody   = body
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            _ = try? await URLSession.shared.data(for: req)
+        }
     }
 
     @ViewBuilder

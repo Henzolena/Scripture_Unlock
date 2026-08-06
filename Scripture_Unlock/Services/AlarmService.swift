@@ -344,6 +344,70 @@ final class AlarmService: NSObject {
             .removePendingNotificationRequests(withIdentifiers: ["reengagement-0", "reengagement-1", "reengagement-2"])
     }
 
+    // MARK: - Escalation for an abandoned alarm
+
+    /// Backoff for re-arming an alarm the user silenced without answering.
+    ///
+    /// Deliberately bounded, and deliberately not a few seconds. iOS guarantees
+    /// the user can always stop an alarm — they can slide it away, force-quit, or
+    /// power off — so an unbounded loop cannot actually compel anything. What it
+    /// would do is read as a malfunction, risk an App Review rejection for
+    /// degrading the experience, and re-create the "cannot silence the alarm"
+    /// trap we deliberately removed. A sub-minute re-arm is also unreliable:
+    /// AlarmKit is not built for that horizon.
+    ///
+    /// ~15 minutes of escalating persistence is enough that going back to sleep
+    /// does not work, while still ending. Beyond that the accountability email
+    /// and the broken streak carry the cost.
+    private static let escalationDelays: [TimeInterval] = [30, 60, 120, 240, 480]
+
+    private var escalationStep = 0
+
+    /// Re-arms an alarm that was silenced with questions outstanding.
+    /// Call when the user leaves the quiz unfinished.
+    func escalateUnresolvedAlarm(_ alarm: Alarm) {
+        guard escalationStep < Self.escalationDelays.count else {
+            print("[AlarmService] Escalation exhausted for '\(alarm.label)' — leaving it alone")
+            return
+        }
+        let delay = Self.escalationDelays[escalationStep]
+        escalationStep += 1
+        let step = escalationStep
+
+        let content = UNMutableNotificationContent()
+        content.title             = "⏰ \(alarm.label)"
+        content.body              = "Your devotion is unfinished — answer \(alarm.effectiveQuestionCount) verses to silence the alarm."
+        content.sound             = AlarmTone.find(id: alarm.toneIdentifier).notificationSound
+        content.interruptionLevel = .timeSensitive
+        content.userInfo          = makeContent(alarm: alarm, notificationId: escalationIdentifier(step: step)).userInfo
+
+        let request = UNNotificationRequest(
+            identifier: escalationIdentifier(step: step),
+            content:    content,
+            trigger:    UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request)
+
+        // Upgrade to a real AlarmKit alarm where available, so it rings rather
+        // than merely notifying.
+        if #available(iOS 26, *) {
+            let fireDate = Date(timeIntervalSinceNow: delay)
+            Task { await scheduleWithAlarmKit(alarm, snoozeFireDate: fireDate) }
+        }
+
+        print("[AlarmService] Escalation \(step)/\(Self.escalationDelays.count) armed in \(Int(delay))s")
+    }
+
+    /// Clears any pending escalation and resets the ladder.
+    func cancelEscalation() {
+        let ids = (1...Self.escalationDelays.count).map { escalationIdentifier(step: $0) }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        escalationStep = 0
+    }
+
+    private func escalationIdentifier(step: Int) -> String { "escalation-\(step)" }
+
     /// Restarts alarm audio when the app returns to foreground while an alarm
     /// is active but audio was not playing (e.g. backgrounded before audio started).
     func restartAlarmAudioIfNeeded() {
@@ -535,6 +599,7 @@ final class AlarmService: NSObject {
         stopBackgroundMonitoring()
         stopAlarmAudio()
         cancelReengagementNotification()
+        cancelEscalation()
 
         var ids = allIdentifiers(for: alarm)
         if let nid = activeNotificationId { ids.append(nid) }

@@ -33,7 +33,12 @@ final class StreakEntry {
     var questionsAnswered: Int = 0
     var questionsCorrect: Int = 0
     var snoozeCount: Int = 0
+    /// Set only when every question was answered. This is what counts as a
+    /// completed morning — the friends leaderboard keys off it.
     var dismissedAt: Date?
+    /// Set when the alarm was silenced with questions still outstanding, so
+    /// bailing out is visible instead of scoring the same as finishing.
+    var abandonedAt: Date?
 
     var accuracy: Double {
         guard questionsAnswered > 0 else { return 0 }

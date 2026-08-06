@@ -107,9 +107,14 @@ struct RootView: View {
                 // (e.g. user backgrounded mid-quiz before the 0.5 s delay fired).
                 alarmService.restartAlarmAudioIfNeeded()
             } else if newPhase == .background {
-                if alarmService.activeAlarm != nil {
-                    // Mid-alarm backgrounding: post re-engagement notification
+                if let active = alarmService.activeAlarm {
+                    // Mid-alarm backgrounding: post re-engagement notification.
                     alarmService.scheduleReengagementNotification()
+                    // activeAlarm is only non-nil while the quiz is unfinished —
+                    // dismissAlarm() clears it on completion — so walking away here
+                    // means the devotion was abandoned. Re-arm on a bounded ladder
+                    // so going back to sleep does not work.
+                    alarmService.escalateUnresolvedAlarm(active)
                 } else {
                     // Normal background: arm the silent keep-alive + timer
                     // so the next alarm fires even while the app is backgrounded

@@ -429,7 +429,8 @@ final class SupabaseService {
             questionsAnswered: entry.questionsAnswered,
             questionsCorrect:  entry.questionsCorrect,
             snoozeCount:       entry.snoozeCount,
-            dismissedAt:       entry.dismissedAt.map { ISO8601DateFormatter().string(from: $0) }
+            dismissedAt:       entry.dismissedAt.map { ISO8601DateFormatter().string(from: $0) },
+            abandonedAt:       entry.abandonedAt.map { ISO8601DateFormatter().string(from: $0) }
         )
         _ = try? await makeDB(token: session.accessToken).from("streak_entries").upsert(payload).execute()
     }
@@ -719,6 +720,7 @@ private struct StreakPayload: Encodable {
     let questionsCorrect:  Int
     let snoozeCount:       Int
     let dismissedAt:       String?
+    let abandonedAt:       String?
 
     enum CodingKeys: String, CodingKey {
         case date
@@ -727,5 +729,6 @@ private struct StreakPayload: Encodable {
         case questionsCorrect  = "questions_correct"
         case snoozeCount       = "snooze_count"
         case dismissedAt       = "dismissed_at"
+        case abandonedAt       = "abandoned_at"
     }
 }
