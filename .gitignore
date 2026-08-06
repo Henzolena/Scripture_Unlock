@@ -25,3 +25,9 @@ supabase/.temp/
 # Gemini / other secret scratch files
 gemeni-key-secret.md
 *.key.md
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
