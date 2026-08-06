@@ -44,7 +44,7 @@ Deno.serve(async (req)=>{
   try {
     const { userId, title, body, data = {} } = await req.json();
     const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
-    const { data: tokens, error } = await supabase.from('device_tokens').select('token').eq('user_id', userId).eq('platform', 'ios');
+    const { data: tokens, error } = await supabase.from('device_tokens').select('token, environment').eq('user_id', userId).eq('platform', 'ios');
     if (error || !tokens?.length) {
       return new Response(JSON.stringify({
         sent: 0
@@ -55,8 +55,17 @@ Deno.serve(async (req)=>{
       });
     }
     const jwt = await generateAPNsJWT();
-    const host = APNS_PRODUCTION ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
-    const results = await Promise.allSettled(tokens.map(({ token })=>fetch(`https://${host}/3/device/${token}`, {
+    // Choose the gateway per token. APNs tokens are environment-specific: a
+    // sandbox token sent to the production gateway (or vice versa) is rejected
+    // with BadDeviceToken. A single global APNS_PRODUCTION flag therefore broke
+    // whichever half of the devices it did not match. Fall back to the flag only
+    // for rows predating the environment column.
+    const gatewayFor = (environment)=>{
+      const env = environment ?? (APNS_PRODUCTION ? 'production' : 'sandbox');
+      return env === 'sandbox' ? 'api.sandbox.push.apple.com' : 'api.push.apple.com';
+    };
+    const results = await Promise.allSettled(tokens.map(async ({ token, environment })=>{
+      const res = await fetch(`https://${gatewayFor(environment)}/3/device/${token}`, {
         method: 'POST',
         headers: {
           'authorization': `bearer ${jwt}`,
@@ -75,10 +84,25 @@ Deno.serve(async (req)=>{
           },
           ...data
         })
-      })));
+      });
+      // A rejected push still resolves the fetch, so the old
+      // `status === 'fulfilled'` count reported success for every failure —
+      // which is why broken delivery went unnoticed. Surface APNs' verdict.
+      if (!res.ok) {
+        const reason = await res.text().catch(()=>'');
+        throw new Error(`APNs ${res.status} ${reason} (env=${environment ?? 'unknown'})`);
+      }
+      return true;
+    }));
     const sent = results.filter((r)=>r.status === 'fulfilled').length;
+    const failures = results.filter((r)=>r.status === 'rejected').map((r)=>String(r.reason?.message ?? r.reason));
+    if (failures.length) console.error('[send-push] failures:', failures);
+    // Report failures too, so a caller (and the function logs) can tell the
+    // difference between "nobody to notify" and "every push was rejected".
     return new Response(JSON.stringify({
-      sent
+      sent,
+      failed: failures.length,
+      errors: failures
     }), {
       headers: {
         'Content-Type': 'application/json'

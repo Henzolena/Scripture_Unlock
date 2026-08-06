@@ -75,6 +75,33 @@ final class PushNotificationService {
         }
     }
 
+    /// Which APNs gateway this build's tokens belong to.
+    ///
+    /// Tokens are environment-specific: a build signed for development registers
+    /// with the sandbox gateway, one signed for distribution with production. The
+    /// server cannot infer this, and a single global flag gets it wrong for
+    /// whichever half of the devices it does not match — APNs just answers
+    /// BadDeviceToken, so the failure is silent.
+    ///
+    /// Read it from the embedded provisioning profile, which states the truth for
+    /// this exact binary. App Store builds ship without a profile, and those are
+    /// always production.
+    static var apnsEnvironment: String {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              // The plist inside the CMS envelope is plain ASCII; scan rather than
+              // pulling in a CMS parser for one string.
+              let text = String(data: data, encoding: .ascii)
+        else {
+            return "production"   // no profile => App Store build
+        }
+        guard let range = text.range(of: "<key>aps-environment</key>") else {
+            return "production"
+        }
+        let tail = text[range.upperBound...].prefix(120)
+        return tail.contains("development") ? "sandbox" : "production"
+    }
+
     private func storeToken(_ token: String) async {
         guard SupabaseService.shared.isSignedIn,
               let session = try? await SupabaseService.shared.currentSession() else { return }
@@ -84,6 +111,7 @@ final class PushNotificationService {
               let body = try? JSONSerialization.data(withJSONObject: [
                 "user_id": session.user.id.uuidString,
                 "token": token, "platform": "ios",
+                "environment": Self.apnsEnvironment,
                 "updated_at": ISO8601DateFormatter().string(from: Date())
               ]) else { return }
         var req = URLRequest(url: url)
