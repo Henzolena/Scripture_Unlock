@@ -70,5 +70,7 @@ echo "Creating vault item: $ITEM_NAME"
 printf '%s' "$PAYLOAD" | bw encode | bw create item --session "$BW_SESSION" >/dev/null
 echo "Done. ${#KEYS[@]} fields stored."
 echo
-echo "Next: verify a round-trip before deleting anything —"
-echo "  ./scripts/gen-secrets.sh && diff <(sort \"$XCCONFIG\") <(sort \"$XCCONFIG\")"
+echo "Next: prove the round-trip before treating the local file as disposable —"
+echo "  cp \"$XCCONFIG\" /tmp/xcconfig.before"
+echo "  ./scripts/gen-secrets.sh"
+echo "  diff /tmp/xcconfig.before \"$XCCONFIG\"   # values should be identical"
